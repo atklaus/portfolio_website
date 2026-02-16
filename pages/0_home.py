@@ -7,11 +7,11 @@ from app.shared_ui import st_utils as stu
 from app.layout import header
 from shared.settings import email_href, get_settings
 from app.ui.cards import ProjectCard, render_project_cards
-from shared.telemetry import instrument_page_safe
+from shared.telemetry import page_guard
 
 
-def _render():
-    header.page_header('DataEngBuilds',page_name=os.path.basename(__file__))
+with page_guard(os.path.basename(__file__)):
+    header.page_header('DataBuilds.dev',page_name=os.path.basename(__file__))
     # cf = CF(bucket='analytics')
     # cf.store_session(prefix='activity/{}.json.gz')
 
@@ -108,7 +108,7 @@ def _render():
           </div>
           <div class="ads-footer-right">
             <div class="ads-footer-title">© 2026</div>
-            <div class="ads-footer-meta">dataengbuilds.com</div>
+            <div class="ads-footer-meta">databuilds.dev</div>
           </div>
       </div>
       </div>
@@ -116,5 +116,3 @@ def _render():
     """
 
     st.markdown(footer_html, unsafe_allow_html=True)
-
-instrument_page_safe(os.path.basename(__file__), _render)

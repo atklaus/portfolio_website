@@ -26,10 +26,10 @@ import random
 import string
 import bcrypt
 import time
-from shared.telemetry import instrument_page_safe
+from shared.telemetry import page_guard
 
 
-def _render():
+with page_guard(os.path.basename(__file__)):
     # Initialize boto3 client
     page_header('Analytics',page_name=os.path.basename(__file__))
     try:
@@ -165,5 +165,3 @@ def _render():
                 hide_index=True,
                 use_container_width=True
                 )
-
-instrument_page_safe(os.path.basename(__file__), _render)

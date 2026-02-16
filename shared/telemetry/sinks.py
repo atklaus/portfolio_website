@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import gzip
 import io
 import json
 import os
@@ -30,6 +31,11 @@ def _time_str() -> str:
 def _json_lines(events: list[dict]) -> bytes:
     lines = [json.dumps(event, default=str) for event in events]
     return ("\n".join(lines) + "\n").encode("utf-8")
+
+
+def _json_lines_gz(events: list[dict]) -> bytes:
+    payload = _json_lines(events)
+    return gzip.compress(payload)
 
 
 class BaseSink:
@@ -75,8 +81,8 @@ class SpacesSink(BaseSink):
         if not self.config.spaces_bucket:
             return False
         try:
-            body = _json_lines(events)
-            key = self._key("events", session_id, "jsonl")
+            body = _json_lines_gz(events)
+            key = self._key("events", session_id, "jsonl.gz")
             self.client.put_object(Bucket=self.config.spaces_bucket, Key=key, Body=body)
             return True
         except Exception as exc:
@@ -118,9 +124,10 @@ class LocalSink(BaseSink):
         try:
             date_dir = os.path.join(self.base_dir, "events", f"date={_date_str()}")
             self._ensure_dir(date_dir)
-            filename = f"events_{session_id}_{_time_str()}.jsonl"
-            with open(os.path.join(date_dir, filename), "ab") as handle:
-                handle.write(_json_lines(events))
+            rand = os.urandom(3).hex()
+            filename = f"events_{session_id}_{_time_str()}_{rand}.jsonl.gz"
+            with open(os.path.join(date_dir, filename), "wb") as handle:
+                handle.write(_json_lines_gz(events))
             return True
         except Exception:
             return False

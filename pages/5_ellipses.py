@@ -19,11 +19,11 @@ from shared import utils
 from app.config import BASE_DIR, CREDS
 from app.layout.header import page_header
 from projects.ellipses import Ellipse, OverlapOfEllipses, Point
-from shared.telemetry import instrument_page_safe
+from shared.telemetry import page_guard
 
 
 
-def _render():
+with page_guard(os.path.basename(__file__)):
     def app():
 
         stu.V_SPACE(1)
@@ -112,5 +112,3 @@ def _render():
     # Your existing code for page_header and other parts...
     page_header('Overlapping Ellipses',page_name=os.path.basename(__file__))
     app()
-
-instrument_page_safe(os.path.basename(__file__), _render)

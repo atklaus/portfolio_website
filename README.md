@@ -1,6 +1,6 @@
-# DataEngBuilds - Data Engineering Portfolio
+# DataBuilds.dev - Data Engineering Portfolio
 
-DataEngBuilds is my Streamlit portfolio for end-to-end data engineering work. Start at the app homepage to explore featured projects and their production-style pipelines.
+DataBuilds.dev is my Streamlit portfolio for end-to-end data engineering work. Start at the app homepage to explore featured projects and their production-style pipelines.
 
 ## Featured
 
@@ -32,7 +32,7 @@ Links: `pages/8_bibliometrix_reference_cleaner.py` (open in app) | `projects/bib
 
 ## Quickstart
 **Poetry**: `poetry install` then `poetry run streamlit run app.py`
-**Docker**: `docker build -t dataengbuilds .` then `docker run -p 8501:8501 --env-file .env dataengbuilds`
+**Docker**: `docker build -t databuilds .` then `docker run -p 8501:8501 --env-file .env databuilds`
 
 ## Secrets
 Create a local secrets file and keep it out of version control.
@@ -42,7 +42,7 @@ Create a local secrets file and keep it out of version control.
 Example:
 ```toml
 [app]
-name = "DataEngBuilds"
+name = "DataBuilds.dev"
 
 [links]
 github = "https://github.com/youruser"
@@ -56,7 +56,7 @@ level = "INFO"
 Docker secrets: mount `.streamlit/secrets.toml` into the container or set env vars such as `GITHUB_URL` and `CONTACT_EMAIL` at runtime. Never bake secrets into the image.
 
 ## Telemetry Logging (DigitalOcean Spaces)
-Telemetry is shipped to Spaces as JSONL event logs and optional Parquet session rollups.
+Telemetry is shipped to Spaces as compressed JSONL event logs and optional Parquet session rollups.
 
 **Env vars**
 - `LOGGING_ENABLED=true|false`
@@ -75,7 +75,7 @@ Telemetry is shipped to Spaces as JSONL event logs and optional Parquet session 
 **DuckDB queries**
 ```sql
 SELECT COUNT(*)
-FROM read_json_auto('s3://your-bucket/telemetry/events/date=*/events_*.jsonl');
+FROM read_json_auto('s3://your-bucket/telemetry/events/date=*/events_*.jsonl.gz');
 
 SELECT COUNT(*)
 FROM read_parquet('s3://your-bucket/telemetry/sessions/date=*/sessions_*.parquet');

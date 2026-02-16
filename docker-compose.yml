@@ -1,7 +1,7 @@
 version: "3.9"
 
 services:
-  dataengbuilds:
+  databuilds:
     build: .
     ports:
       - "8501:8501"
@@ -19,4 +19,4 @@ services:
       SPACES_SECRET_ACCESS_KEY: "your-secret-key"
       SPACES_PREFIX: "telemetry/"
     volumes:
-      - /var/lib/dataengbuilds/data:/app/data
+      - /var/lib/databuilds/data:/app/data

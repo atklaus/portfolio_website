@@ -16,9 +16,9 @@ from projects.bibclean.apply.wos_apply import apply_mapping_to_wos_records
 from projects.bibclean.canonicalize import canonicalize_references
 from projects.bibclean.io.detect import detect_input_format
 from projects.bibclean.io.scopus_csv import (
-from shared.telemetry import instrument_page_safe
+from shared.telemetry import page_guard
 
-def _render():
+with page_guard(os.path.basename(__file__)):
         build_documents_from_scopus,
         extract_scopus_references,
         load_scopus_csv,
@@ -1084,5 +1084,3 @@ def _render():
             "Tuning tip: Higher auto-merge confidence means fewer automatic merges (more conservative). "
             "Higher review threshold means fewer references shown for manual review."
         )
-
-instrument_page_safe(os.path.basename(__file__), _render)

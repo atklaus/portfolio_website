@@ -198,3 +198,14 @@ def instrument_page_safe(page: str, fn):
     except Exception as exc:
         log_error(page, exc)
         raise
+
+
+@contextmanager
+def page_guard(page: str):
+    """Guard a page body to ensure exceptions are logged even if Streamlit catches them."""
+    try:
+        instrument_page(page)
+        yield
+    except Exception as exc:
+        log_error(page, exc)
+        raise

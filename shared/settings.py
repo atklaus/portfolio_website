@@ -31,7 +31,7 @@ def _get_env(key: str, default: str) -> str:
 
 
 def get_settings() -> AppSettings:
-    app_name = _get_secret("app", "name", _get_env("APP_NAME", "DataEngBuilds"))
+    app_name = _get_secret("app", "name", _get_env("APP_NAME", "DataBuilds.dev"))
     github_url = _get_secret("links", "github", _get_env("GITHUB_URL", "https://github.com/atklaus"))
     linkedin_url = _get_secret("links", "linkedin", _get_env("LINKEDIN_URL", "https://linkedin.com/in/adam-klaus"))
     contact_email = _get_secret("links", "email", _get_env("CONTACT_EMAIL", "atk14219@gmail.com"))

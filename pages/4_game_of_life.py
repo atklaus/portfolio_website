@@ -6,10 +6,10 @@ import streamlit as st
 
 from app.layout.header import page_header, set_page_container_style
 from projects.game_of_life import GameOfLife
-from shared.telemetry import instrument_page_safe
+from shared.telemetry import page_guard
 
 
-def _render():
+with page_guard(os.path.basename(__file__)):
     # The `page_header('Game of Life')` function is likely a custom function defined in the
     # `layout.header` module. It is used to display a header or title for the Game of Life page in the
     # Streamlit application.
@@ -95,5 +95,3 @@ def _render():
             # Update the plot centered
             plot.plotly_chart(fig, use_container_width=False, key=f"gof_chart_{k}")
             time.sleep(0.5)  # Adding a delay to create an animation effect
-
-instrument_page_safe(os.path.basename(__file__), _render)

@@ -15,10 +15,10 @@ import re
 import joblib
 import datetime
 import html as html_lib
-from shared.telemetry import instrument_page_safe
+from shared.telemetry import page_guard
 
 
-def _render():
+with page_guard(os.path.basename(__file__)):
     MODEL_PATH = os.path.join(
         BASE_DIR, "projects", "wnba_success", "model", "wnba_success_model.joblib"
     )
@@ -909,5 +909,3 @@ def _render():
 
     # Call the function to display the paper context
     display_paper_context()
-
-instrument_page_safe(os.path.basename(__file__), _render)

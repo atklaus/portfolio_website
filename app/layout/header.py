@@ -5,7 +5,6 @@ import streamlit as st
 
 from .. import config as c
 from app.shared_ui import theme
-from shared.telemetry import instrument_page
 from shared.settings import email_href, get_settings
 
 BACKGROUND_COLOR = "white"
@@ -188,10 +187,6 @@ def render_sidebar_nav(page_name: str):
 
 def page_header(title, page_name, container_style=True):
     theme.inject_base_styles()
-    try:
-        instrument_page(str(page_name))
-    except Exception:
-        pass
     render_sidebar_nav(page_name)
     if container_style:
         set_page_container_style(

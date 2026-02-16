@@ -19,11 +19,11 @@ from shared import utils
 from app.config import BASE_DIR, CREDS
 from app.layout.header import page_header
 from projects.happy_prime import HappyPrime
-from shared.telemetry import instrument_page_safe
+from shared.telemetry import page_guard
 
 
 
-def _render():
+with page_guard(os.path.basename(__file__)):
     def app():
         stu.V_SPACE(1)
         st.subheader("Happy Prime Calculator")
@@ -55,5 +55,3 @@ def _render():
 
     page_header('Happy Prime Calculator',page_name=os.path.basename(__file__))
     app()
-
-instrument_page_safe(os.path.basename(__file__), _render)

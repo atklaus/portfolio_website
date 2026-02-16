@@ -5,10 +5,10 @@ import streamlit as st
 
 from app.layout.header import page_header
 from shared.telemetry.config import get_config
-from shared.telemetry import instrument_page_safe
+from shared.telemetry import page_guard
 
 
-def _render():
+with page_guard(os.path.basename(__file__)):
     page_header("Telemetry Admin", page_name=os.path.basename(__file__))
 
     st.markdown("## Telemetry Overview")
@@ -35,11 +35,11 @@ def _render():
         con.execute("SET s3_use_ssl=true")
 
         base_prefix = config.spaces_prefix.rstrip("/")
-        events_glob = f"s3://{config.spaces_bucket}/{base_prefix}/events/date=*/events_*.jsonl"
+        events_glob = f"s3://{config.spaces_bucket}/{base_prefix}/events/date=*/events_*.jsonl.gz"
         sessions_glob = f"s3://{config.spaces_bucket}/{base_prefix}/sessions/date=*/sessions_*.parquet"
     else:
         log_dir = Path("data/logs")
-        events_glob = str(log_dir / "events" / "date=*" / "events_*.jsonl")
+        events_glob = str(log_dir / "events" / "date=*" / "events_*.jsonl.gz")
         sessions_glob = str(log_dir / "sessions" / "date=*" / "sessions_*.parquet")
 
     col1, col2, col3 = st.columns(3)
@@ -109,5 +109,3 @@ def _render():
         st.dataframe(df_recent, use_container_width=True, hide_index=True)
     except Exception:
         st.caption("No events yet.")
-
-instrument_page_safe(os.path.basename(__file__), _render)

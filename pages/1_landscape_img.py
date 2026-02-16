@@ -14,10 +14,10 @@ import os
 import cv2
 from tensorflow import keras
 import numpy as np
-from shared.telemetry import instrument_page_safe
+from shared.telemetry import page_guard
 
 
-def _render():
+with page_guard(os.path.basename(__file__)):
     ROOT_DIR = Path(__file__).resolve().parents[1]
     MODEL_DIR = ROOT_DIR / "projects" / "landscape_img" / "model"
 
@@ -136,5 +136,3 @@ def _render():
         #     st.markdown("2. Hit enter or click away to store the change")
         #     st.markdown("3. Click submit and changes will be recorded")
         #     st.markdown("4. You can validate this update by reloading the page and seeing the values")
-
-instrument_page_safe(os.path.basename(__file__), _render)
