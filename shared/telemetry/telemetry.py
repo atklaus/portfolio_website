@@ -8,6 +8,7 @@ from typing import Any
 
 import streamlit as st
 
+from lib.ops.memory import log_mem
 from .config import TelemetryConfig, get_config
 from shared.logging.ops import set_log_context
 from .session import (
@@ -210,8 +211,11 @@ def instrument_page_safe(page: str, fn):
 def page_guard(page: str):
     """Guard a page body to ensure exceptions are logged even if Streamlit catches them."""
     try:
+        log_mem(f"page_start:{page}")
         instrument_page(page)
         yield
     except Exception as exc:
         log_error(page, exc)
         raise
+    finally:
+        log_mem(f"page_end:{page}")

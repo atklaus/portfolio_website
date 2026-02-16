@@ -5,6 +5,7 @@ import streamlit as st
 
 from .. import config as c
 from app.shared_ui import theme
+from lib.ops.memory import log_mem
 from shared.seo import apply_page_meta
 from shared.settings import email_href, get_settings
 
@@ -193,6 +194,10 @@ def page_header(title, page_name, container_style=True):
     except Exception:
         pass
     render_sidebar_nav(page_name)
+    settings = get_settings()
+    if settings.safe_mode:
+        st.warning("Safe mode is enabled. Heavy demos and admin queries are disabled.")
+    log_mem(f"page_header:{page_name}")
     if container_style:
         set_page_container_style(
             max_width_100_percent=True,

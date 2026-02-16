@@ -1,29 +1,29 @@
+import os
+
 import streamlit as st
-import pandas as pd
-import sys
-import os
 from pathlib import Path
-from app.config import BASE_DIR, CREDS
 from app.layout.header import page_header
-import datetime
-from datetime import date, datetime
-from dateutil import tz
-import os
 from app.shared_ui import st_utils as stu
-import os
-import cv2
-from tensorflow import keras
-import numpy as np
+from lib.ops.memory import log_mem
+from shared.settings import get_settings
 from shared.telemetry import page_guard
 
 
 with page_guard(os.path.basename(__file__)):
+    settings = get_settings()
+    if settings.safe_mode:
+        st.warning("Safe mode is enabled. This page is disabled to reduce memory usage.")
+        st.stop()
+
     ROOT_DIR = Path(__file__).resolve().parents[1]
     MODEL_DIR = ROOT_DIR / "projects" / "landscape_img" / "model"
 
-    @st.cache_resource(ttl=43200,show_spinner='Loading Model')
     def init_model():
-        return keras.models.load_model(str(MODEL_DIR))
+        log_mem("landscape_model_load:before")
+        from tensorflow import keras
+        model = keras.models.load_model(str(MODEL_DIR))
+        log_mem("landscape_model_load:after")
+        return model
 
 
     def image_to_tiles(img, tile_size=(150, 150), overlap=50):
@@ -37,6 +37,7 @@ with page_guard(os.path.basename(__file__)):
         return tiles
 
     def predict_tiles(tiles, model):
+        import numpy as np
         predictions = []
         for tile in tiles:
             prediction = model.predict(tile.reshape(-1,150,150,3))
@@ -45,7 +46,6 @@ with page_guard(os.path.basename(__file__)):
 
     def combine_predictions(predictions):
         return predictions.mean(axis=0)
-
     import numpy as np
 
     def combine_predictions(tile_predictions):
@@ -106,10 +106,13 @@ with page_guard(os.path.basename(__file__)):
 
     if uploaded_file is not None:
         class_names = ['buildings', 'forest', 'glacier', 'mountain', 'sea', 'street']
+        log_mem("landscape_predict:before_model")
         model = init_model()
+        log_mem("landscape_predict:after_model")
 
         with st.spinner('Making prediction...'):
             bytes_data = uploaded_file.getvalue()
+            import cv2
             img = cv2.imdecode(np.frombuffer(bytes_data, np.uint8), cv2.IMREAD_UNCHANGED)
 
             tiles = image_to_tiles(img, overlap=10)

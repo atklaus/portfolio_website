@@ -21,7 +21,7 @@ from lib.storage.s3_compat import get_storage_config, is_configured
 
 load_dotenv()
 
-@st.cache_resource()
+@st.cache_resource(ttl=3600, max_entries=1)
 def get_manager():
     return stx.CookieManager(key='cookie')
 
@@ -346,5 +346,4 @@ class CloudFunctions:
         data['result'] = df.to_dict('records')
         data['created_at'] = str(datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S%z"))
         return data
-
 

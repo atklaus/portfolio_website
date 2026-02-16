@@ -15,6 +15,7 @@ class AppSettings:
     contact_email: str
     logging_level: str
     ga_measurement_id: str
+    safe_mode: bool
 
 
 def _get_secret(section: str, key: str, default: str) -> str:
@@ -32,6 +33,13 @@ def _get_env(key: str, default: str) -> str:
     return value if value else default
 
 
+def _get_env_bool(key: str, default: bool = False) -> bool:
+    value = os.environ.get(key)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "y"}
+
+
 def get_settings() -> AppSettings:
     app_name = _get_secret("app", "name", _get_env("APP_NAME", "DataBuilds.dev"))
     site_url = _get_secret("app", "site_url", _get_env("SITE_URL", "https://databuilds.dev"))
@@ -47,6 +55,7 @@ def get_settings() -> AppSettings:
     except Exception:
         ga_measurement_id = ""
     ga_measurement_id = ga_measurement_id or _get_env("GA_MEASUREMENT_ID", "")
+    safe_mode = _get_env_bool("APP_SAFE_MODE", False)
     return AppSettings(
         app_name=app_name,
         site_url=site_url,
@@ -55,6 +64,7 @@ def get_settings() -> AppSettings:
         contact_email=contact_email,
         logging_level=logging_level,
         ga_measurement_id=ga_measurement_id,
+        safe_mode=safe_mode,
     )
 
 

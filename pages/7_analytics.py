@@ -27,11 +27,17 @@ import string
 import bcrypt
 import time
 from shared.telemetry import page_guard
+from lib.ops.memory import log_mem
+from shared.settings import get_settings
 
 
 with page_guard(os.path.basename(__file__)):
     # Initialize boto3 client
     page_header('Analytics',page_name=os.path.basename(__file__))
+    settings = get_settings()
+    if settings.safe_mode:
+        st.warning("Safe mode is enabled. This page is disabled to reduce memory usage.")
+        st.stop()
     try:
         cf = CF(bucket='portfolio-website')
     except RuntimeError as exc:
@@ -41,7 +47,6 @@ with page_guard(os.path.basename(__file__)):
     bucket_name = 'portfolio-website'
     prefix = 'analytics/activity/'  # Update this based on your folder structure
 
-    @st.cache_data(ttl=43200, show_spinner=False)
     def fetch_data(client, bucket_name, prefix):
         response = client.list_objects_v2(Bucket=bucket_name, Prefix=prefix)
         df = pd.DataFrame()
@@ -117,7 +122,9 @@ with page_guard(os.path.basename(__file__)):
 
         col1, col2, col3, col4= st.columns([2,2,2,2])
 
+        log_mem("analytics_fetch:before")
         df = fetch_data(cf.client, 'portfolio-website', 'analytics/activity/')
+        log_mem("analytics_fetch:after")
         df = process_dataframe(df)
         metrics = generate_metrics(df)
 

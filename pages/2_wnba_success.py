@@ -3,6 +3,8 @@ import pandas as pd
 from app.config import BASE_DIR, CREDS
 from app.layout.header import page_header
 from app.shared_ui import st_utils as stu
+from lib.ops.memory import log_mem
+from shared.settings import get_settings
 import os
 import time
 import random
@@ -12,13 +14,17 @@ from bs4 import BeautifulSoup, Comment
 from shared import utils
 import requests
 import re
-import joblib
 import datetime
 import html as html_lib
 from shared.telemetry import page_guard
 
 
 with page_guard(os.path.basename(__file__)):
+    settings = get_settings()
+    if settings.safe_mode:
+        st.warning("Safe mode is enabled. This page is disabled to reduce memory usage.")
+        st.stop()
+
     MODEL_PATH = os.path.join(
         BASE_DIR, "projects", "wnba_success", "model", "wnba_success_model.joblib"
     )
@@ -61,7 +67,7 @@ with page_guard(os.path.basename(__file__)):
         "DNT": "1",
     }
 
-    @st.cache_data(show_spinner=False)
+    @st.cache_data(ttl=3600, max_entries=2, show_spinner=False)
     def load_offline_catalog() -> dict:
         if not OFFLINE_FIXTURE_PATH.exists():
             return {}
@@ -112,9 +118,11 @@ with page_guard(os.path.basename(__file__)):
         return [season] if season else []
 
 
-    @st.cache_resource(show_spinner='Loading model...',ttl=43200)
     def init_model():
+        log_mem("wnba_model_load:before")
+        import joblib
         loaded_model = joblib.load(MODEL_PATH)
+        log_mem("wnba_model_load:after")
 
         # with open(MODEL_PATH, 'rb') as model_file:
         #     loaded_model = pickle.load(model_file)
@@ -323,7 +331,7 @@ with page_guard(os.path.basename(__file__)):
             return srs
         return None
 
-    @st.cache_data(ttl=43200, show_spinner=False)
+    @st.cache_data(ttl=43200, max_entries=128, show_spinner=False)
     def get_team_sos(season, college, team_url=None):
         if team_url:
             team_page_sos = _get_team_page_sos(team_url)
@@ -640,11 +648,12 @@ with page_guard(os.path.basename(__file__)):
     # Your existing imports and code here...
 
     # Function to display PDF within Streamlit app
-    @st.cache_data(show_spinner='Loading pdf...')
     def displayPDF(file):
         # Opening file from file path
+        log_mem("wnba_pdf:before")
         with open(file, "rb") as f:
             base64_pdf = base64.b64encode(f.read()).decode('utf-8')
+        log_mem("wnba_pdf:after")
 
         # Embedding PDF in HTML
         pdf_display = f'<embed src="data:application/pdf;base64,{base64_pdf}" width=100% height="500" type="application/pdf">'
@@ -667,8 +676,10 @@ with page_guard(os.path.basename(__file__)):
 
             pdf_path = PDF_PATH
 
+            log_mem("wnba_pdf_download:before")
             with open(pdf_path, "rb") as f:
                 pdf_bytes = f.read()
+            log_mem("wnba_pdf_download:after")
 
             st.download_button(
                 label="Download Paper",
@@ -695,7 +706,7 @@ with page_guard(os.path.basename(__file__)):
     st.write("This page provides insights into WNBA players' success, leveraging predictive modeling based on college performance.")
 
 
-    @st.cache_data(ttl=42300,show_spinner=False)
+    @st.cache_data(ttl=42300, max_entries=50, show_spinner=False)
     def get_team_urls(year=2023):
 
         user_agent = random.choice(utils.user_agents) 
@@ -709,7 +720,7 @@ with page_guard(os.path.basename(__file__)):
 
         return {key: BASE_URL + val for key, val in url_dict.items() if f'/women/{year}' in val and '/cbb/schools/' in val}
 
-    @st.cache_data(ttl=42300,show_spinner=False)
+    @st.cache_data(ttl=42300, max_entries=200, show_spinner=False)
     def get_player_urls(team_url):
         user_agent = random.choice(utils.user_agents) 
         headers = {'User-Agent': user_agent} 
@@ -830,7 +841,9 @@ with page_guard(os.path.basename(__file__)):
 
     if search:
         with st.spinner("Running model..."):
+            log_mem("wnba_predict:before_data")
             base_df = get_player_df(search_dict)
+            log_mem("wnba_predict:after_data")
             if base_df is None or base_df.empty:
                 st.stop()
 
@@ -845,7 +858,9 @@ with page_guard(os.path.basename(__file__)):
                 elif "pg_sos" not in base_df.columns:
                     base_df["pg_sos"] = pd.NA
 
+            log_mem("wnba_predict:before_model")
             model = init_model()
+            log_mem("wnba_predict:after_model")
             model_input = build_model_input(base_df, model)
             if model_input is None:
                 st.stop()
