@@ -41,8 +41,11 @@ Create a local secrets file and keep it out of version control.
 
 Example:
 ```toml
+GA_MEASUREMENT_ID = "G-XXXXXXXXXX"
+
 [app]
 name = "DataBuilds.dev"
+site_url = "https://databuilds.dev"
 
 [links]
 github = "https://github.com/youruser"
@@ -54,6 +57,22 @@ level = "INFO"
 ```
 
 Docker secrets: mount `.streamlit/secrets.toml` into the container or set env vars such as `GITHUB_URL` and `CONTACT_EMAIL` at runtime. Never bake secrets into the image.
+
+## SEO + Analytics
+GA4 is optional and only loads when `GA_MEASUREMENT_ID` is set in `.streamlit/secrets.toml` or the environment.
+
+Pages and titles are centralized in `shared/pages.py`, and the sitemap is generated from that registry on startup.
+
+**Search Console setup**
+1. Verify the domain in Google Search Console using the TXT record they provide.
+2. Add the TXT record in Cloudflare DNS (Registrar/DNS).
+3. Submit the sitemap: `https://databuilds.dev/sitemap.xml`.
+
+**Robots + sitemap**
+Static files live in `static/robots.txt` and `static/sitemap.xml` and are served at `/static/...`.
+If root access does not resolve, add a Cloudflare Transform Rule:
+- Rewrite `/robots.txt` to `/static/robots.txt`
+- Rewrite `/sitemap.xml` to `/static/sitemap.xml`
 
 ## Telemetry Logging (DigitalOcean Spaces)
 Telemetry is shipped to Spaces as compressed JSONL event logs and optional Parquet session rollups.
@@ -94,6 +113,8 @@ Optional storage and analytics use DigitalOcean Spaces. More detail in `docs/POR
 - `pages/` - multipage Streamlit routes
 - `projects/` - project code and artifacts
 - `shared/` - utilities and services
+- `shared/pages.py` - page registry for navigation and sitemap
+- `shared/seo.py` - sitemap generation and meta helpers
 - `static/` - assets
 - `docs/` - portfolio narrative
 

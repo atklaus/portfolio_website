@@ -13,7 +13,7 @@ FROM base AS python-deps
 
 # System deps for building wheels (only in build stage)
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends gcc libgl1-mesa-glx && \
+    apt-get install -y --no-install-recommends gcc libgl1 && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 

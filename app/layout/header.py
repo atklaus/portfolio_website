@@ -5,6 +5,7 @@ import streamlit as st
 
 from .. import config as c
 from app.shared_ui import theme
+from shared.seo import apply_page_meta
 from shared.settings import email_href, get_settings
 
 BACKGROUND_COLOR = "white"
@@ -187,6 +188,10 @@ def render_sidebar_nav(page_name: str):
 
 def page_header(title, page_name, container_style=True):
     theme.inject_base_styles()
+    try:
+        apply_page_meta(str(page_name))
+    except Exception:
+        pass
     render_sidebar_nav(page_name)
     if container_style:
         set_page_container_style(

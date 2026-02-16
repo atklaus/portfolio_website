@@ -1,5 +1,9 @@
 import streamlit as st
+import streamlit.components.v1 as components
 
+from lib.analytics import inject_ga4
+from shared.pages import get_pages
+from shared.seo import ensure_sitemap
 from shared.settings import get_settings
 
 settings = get_settings()
@@ -11,19 +15,33 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
+
+def _maybe_redirect_static() -> None:
+    script = """
+    <script>
+      (function() {
+        const path = window.location.pathname;
+        if (path === '/robots.txt') { window.location.replace('/static/robots.txt'); }
+        if (path === '/sitemap.xml') { window.location.replace('/static/sitemap.xml'); }
+      })();
+    </script>
+    """
+    try:
+        components.html(script, height=0, width=0)
+    except Exception:
+        pass
+
+
+_maybe_redirect_static()
+inject_ga4(settings.ga_measurement_id)
+ensure_sitemap()
+
 with st.sidebar:
     st.empty()
 
 PAGES = [
-    st.Page("pages/0_home.py", title="Home", icon="🏠", default=True),
-    st.Page("pages/2_wnba_success.py", title="WNBA Success", icon="🏀"),
-    st.Page("pages/8_bibliometrix_reference_cleaner.py", title="Bibliometrix Cleaner", icon="📚"),
-    st.Page("pages/1_landscape_img.py", title="Landscape Prediction", icon="🏔️"),
-    st.Page("pages/4_game_of_life.py", title="Game of Life", icon="👾"),
-    st.Page("pages/5_ellipses.py", title="Random Ellipses", icon="♾️"),
-    st.Page("pages/6_happy_prime.py", title="Happy Prime", icon="🙂"),
-    st.Page("pages/7_analytics.py", title="Analytics", icon="📈"),
-    st.Page("pages/9_telemetry_admin.py", title="Telemetry", icon="🧭"),
+    st.Page(page.file, title=page.title, icon=page.icon, default=page.key == "home")
+    for page in get_pages()
 ]
 
 nav = st.navigation(PAGES, position="hidden")
