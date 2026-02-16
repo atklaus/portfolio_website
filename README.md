@@ -42,6 +42,8 @@ Create a local secrets file and keep it out of version control.
 Example:
 ```toml
 GA_MEASUREMENT_ID = "G-XXXXXXXXXX"
+LOG_SINK = "stdout+r2"
+LOGGING_ENABLED = true
 
 [app]
 name = "DataBuilds.dev"
@@ -57,6 +59,7 @@ level = "INFO"
 ```
 
 Docker secrets: mount `.streamlit/secrets.toml` into the container or set env vars such as `GITHUB_URL` and `CONTACT_EMAIL` at runtime. Never bake secrets into the image.
+See `.streamlit/secrets.example.toml` for the full R2/SPACES credential set.
 
 ## SEO + Analytics
 GA4 is optional and only loads when `GA_MEASUREMENT_ID` is set in `.streamlit/secrets.toml` or the environment.
@@ -80,22 +83,51 @@ Deployments run on every push to `master` via GitHub Actions.
 2. Add the token as a GitHub repo secret: `FLY_API_TOKEN`
 3. Push to `master` to trigger `fly deploy --remote-only`
 
-## Telemetry Logging (DigitalOcean Spaces)
-Telemetry is shipped to Spaces as compressed JSONL event logs and optional Parquet session rollups.
+## Storage + Telemetry (R2 preferred)
+Object storage is S3-compatible. Cloudflare R2 is preferred, with Spaces/S3 as a fallback. The same config is used for telemetry and project storage.
+
+**Project storage prefixes**
+- `datasets/<project>/<name>/<version>/...`
+- `artifacts/<project>/<name>/<run_id>/...`
+- `models/<project>/<name>/<version>/...`
+- `embeddings/<project>/<name>/<version>/...`
+- `images/<project>/<name>/...`
+
+**Telemetry prefixes**
+- `telemetry/events/date=YYYY-MM-DD/events_<session_id>_<time>_<rand>.jsonl.gz`
+- `telemetry/sessions/date=YYYY-MM-DD/sessions_<session_id>.parquet`
+
+**Ops prefixes**
+- `ops/logs/date=YYYY-MM-DD/instance=<id>/logs_<time>_<rand>.ndjson.gz`
+- `ops/sessions/date=YYYY-MM-DD/session_<session_id>.json.gz`
+
+**Retention recommendations (Cloudflare lifecycle rules)**
+- `ops/logs`: 7–30d
+- `telemetry/events`: 30–90d (depending on volume)
+- `telemetry/sessions`: 90–365d
+- `datasets/models/artifacts/embeddings/images`: indefinite
+
+## Telemetry Logging (R2 preferred)
+Telemetry is shipped to object storage as compressed JSONL event logs and optional Parquet session rollups. `LOG_SINK` also controls ops log shipping to `ops/logs`.
 
 **Env vars**
 - `LOGGING_ENABLED=true|false`
-- `LOG_SINK=stdout|spaces|stdout+spaces`
+- `LOG_SINK=stdout|spaces|stdout+spaces` (aliases: `r2`, `s3`; example: `stdout+r2`)
 - `LOG_FLUSH_EVENTS=25`
 - `LOG_FLUSH_SECONDS=5`
 - `LOG_SESSION_FLUSH_SECONDS=60`
 - `APP_VERSION=dev`
+- `R2_BUCKET=your-bucket`
+- `R2_REGION=auto`
+- `R2_ENDPOINT=https://<account_id>.r2.cloudflarestorage.com`
+- `R2_ACCESS_KEY_ID=...`
+- `R2_SECRET_ACCESS_KEY=...`
+- Legacy fallback:
 - `SPACES_BUCKET=your-bucket`
 - `SPACES_REGION=nyc3`
 - `SPACES_ENDPOINT=https://nyc3.digitaloceanspaces.com`
 - `SPACES_ACCESS_KEY_ID=...`
 - `SPACES_SECRET_ACCESS_KEY=...`
-- `SPACES_PREFIX=telemetry/`
 
 **DuckDB queries**
 ```sql
@@ -111,7 +143,7 @@ Open `pages/9_telemetry_admin.py` to view sessions, page views, and errors using
 
 ## Architecture (High Level)
 User -> Streamlit UI (`app.py`, `pages/*`) -> project modules (`projects/*`) -> data sources and model artifacts.
-Optional storage and analytics use DigitalOcean Spaces. More detail in `docs/PORTFOLIO.md`.
+Optional storage and analytics use S3-compatible object storage (Cloudflare R2). More detail in `docs/PORTFOLIO.md`.
 
 ## Repo Map
 - `app.py` - Streamlit entrypoint

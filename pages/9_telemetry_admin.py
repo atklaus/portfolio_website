@@ -4,6 +4,8 @@ from pathlib import Path
 import streamlit as st
 
 from app.layout.header import page_header
+from lib.storage import paths as storage_paths
+from lib.storage.s3_compat import duckdb_httpfs_config, is_configured, s3_url
 from shared.telemetry.config import get_config
 from shared.telemetry import page_guard
 
@@ -22,21 +24,23 @@ with page_guard(os.path.basename(__file__)):
 
     con = duckdb.connect()
 
-    use_spaces = "spaces" in config.sink.lower() and config.spaces_bucket
+    sink_flag = config.sink.lower()
+    use_storage = any(token in sink_flag for token in ("spaces", "r2", "s3")) and is_configured(
+        config.storage
+    )
 
-    if use_spaces:
+    if use_storage:
         con.execute("INSTALL httpfs")
         con.execute("LOAD httpfs")
-        con.execute(f"SET s3_region='{config.spaces_region}'")
-        con.execute(f"SET s3_endpoint='{config.spaces_endpoint}'")
-        con.execute(f"SET s3_access_key_id='{config.spaces_access_key_id}'")
-        con.execute(f"SET s3_secret_access_key='{config.spaces_secret_access_key}'")
-        con.execute("SET s3_url_style='path'")
-        con.execute("SET s3_use_ssl=true")
+        for key, value in duckdb_httpfs_config(config.storage).items():
+            if value in ("", None):
+                continue
+            if isinstance(value, bool):
+                value = "true" if value else "false"
+            con.execute(f"SET {key}='{value}'")
 
-        base_prefix = config.spaces_prefix.rstrip("/")
-        events_glob = f"s3://{config.spaces_bucket}/{base_prefix}/events/date=*/events_*.jsonl.gz"
-        sessions_glob = f"s3://{config.spaces_bucket}/{base_prefix}/sessions/date=*/sessions_*.parquet"
+        events_glob = s3_url(storage_paths.telemetry_events_glob(), config.storage)
+        sessions_glob = s3_url(storage_paths.telemetry_sessions_glob(), config.storage)
     else:
         log_dir = Path("data/logs")
         events_glob = str(log_dir / "events" / "date=*" / "events_*.jsonl.gz")

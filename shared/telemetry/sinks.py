@@ -4,28 +4,15 @@ import gzip
 import io
 import json
 import os
-import time
 from dataclasses import dataclass
-from datetime import datetime, timezone
-from typing import Iterable
+from datetime import datetime
 
-import boto3
-import streamlit as st
+from lib.storage import io as storage_io
+from lib.storage import paths as storage_paths
+from lib.storage.s3_compat import is_configured
 
 from .config import TelemetryConfig
 from .session import SessionSnapshot
-
-
-def _utc_now() -> datetime:
-    return datetime.now(timezone.utc)
-
-
-def _date_str() -> str:
-    return _utc_now().strftime("%Y-%m-%d")
-
-
-def _time_str() -> str:
-    return _utc_now().strftime("%H%M%S")
 
 
 def _json_lines(events: list[dict]) -> bytes:
@@ -60,37 +47,27 @@ class StdoutSink(BaseSink):
 class SpacesSink(BaseSink):
     config: TelemetryConfig
 
-    def __post_init__(self) -> None:
-        self.client = boto3.client(
-            "s3",
-            region_name=self.config.spaces_region or None,
-            endpoint_url=self.config.spaces_endpoint or None,
-            aws_access_key_id=self.config.spaces_access_key_id or None,
-            aws_secret_access_key=self.config.spaces_secret_access_key or None,
-        )
-
-    def _key(self, kind: str, session_id: str, ext: str) -> str:
-        prefix = self.config.spaces_prefix.rstrip("/") + "/"
-        date_part = f"date={_date_str()}"
-        rand = os.urandom(3).hex()
-        return f"{prefix}{kind}/{date_part}/{kind}_{session_id}_{_time_str()}_{rand}.{ext}"
-
     def write_events(self, events: list[dict], session_id: str) -> bool:
         if not events:
             return True
-        if not self.config.spaces_bucket:
+        if not is_configured(self.config.storage):
             return False
         try:
             body = _json_lines_gz(events)
-            key = self._key("events", session_id, "jsonl.gz")
-            self.client.put_object(Bucket=self.config.spaces_bucket, Key=key, Body=body)
+            key = storage_paths.telemetry_events_key(session_id)
+            storage_io.put_bytes(
+                key,
+                body,
+                content_type="application/x-ndjson",
+                content_encoding="gzip",
+            )
             return True
         except Exception as exc:
             print(f"SpacesSink events upload failed: {exc}")
             return False
 
     def write_session(self, snapshot: SessionSnapshot) -> bool:
-        if not self.config.spaces_bucket:
+        if not is_configured(self.config.storage):
             return False
         try:
             import pandas as pd
@@ -100,9 +77,15 @@ class SpacesSink(BaseSink):
             parquet_buf = io.BytesIO()
             duckdb.from_df(df).write_parquet(parquet_buf)
             parquet_buf.seek(0)
-            key = self._key("sessions", snapshot.session_id, "parquet")
-            self.client.put_object(
-                Bucket=self.config.spaces_bucket, Key=key, Body=parquet_buf.read()
+            try:
+                ts = datetime.fromisoformat(snapshot.ts_utc)
+            except Exception:
+                ts = None
+            key = storage_paths.telemetry_sessions_key(snapshot.session_id, ts=ts)
+            storage_io.put_bytes(
+                key,
+                parquet_buf.read(),
+                content_type="application/x-parquet",
             )
             return True
         except Exception as exc:
@@ -120,13 +103,18 @@ class LocalSink(BaseSink):
         except Exception:
             pass
 
+    def _local_path(self, key: str) -> str:
+        normalized = key.lstrip("/")
+        if normalized.startswith("telemetry/"):
+            normalized = normalized[len("telemetry/") :]
+        return os.path.join(self.base_dir, normalized)
+
     def write_events(self, events: list[dict], session_id: str) -> bool:
         try:
-            date_dir = os.path.join(self.base_dir, "events", f"date={_date_str()}")
-            self._ensure_dir(date_dir)
-            rand = os.urandom(3).hex()
-            filename = f"events_{session_id}_{_time_str()}_{rand}.jsonl.gz"
-            with open(os.path.join(date_dir, filename), "wb") as handle:
+            key = storage_paths.telemetry_events_key(session_id)
+            path = self._local_path(key)
+            self._ensure_dir(os.path.dirname(path))
+            with open(path, "wb") as handle:
                 handle.write(_json_lines_gz(events))
             return True
         except Exception:
@@ -136,11 +124,15 @@ class LocalSink(BaseSink):
         try:
             import pandas as pd
 
-            date_dir = os.path.join(self.base_dir, "sessions", f"date={_date_str()}")
-            self._ensure_dir(date_dir)
-            filename = f"sessions_{_time_str()}.parquet"
+            try:
+                ts = datetime.fromisoformat(snapshot.ts_utc)
+            except Exception:
+                ts = None
+            key = storage_paths.telemetry_sessions_key(snapshot.session_id, ts=ts)
+            path = self._local_path(key)
+            self._ensure_dir(os.path.dirname(path))
             df = pd.DataFrame([snapshot.__dict__])
-            df.to_parquet(os.path.join(date_dir, filename), index=False)
+            df.to_parquet(path, index=False)
             return True
         except Exception:
             return False
@@ -151,12 +143,8 @@ def build_sinks(config: TelemetryConfig) -> list[BaseSink]:
     sinks: list[BaseSink] = []
     if "stdout" in sink_flag:
         sinks.append(StdoutSink())
-    if "spaces" in sink_flag:
-        if (
-            config.spaces_bucket
-            and config.spaces_access_key_id
-            and config.spaces_secret_access_key
-        ):
+    if any(token in sink_flag for token in ("spaces", "r2", "s3")):
+        if is_configured(config.storage):
             sinks.append(SpacesSink(config))
         else:
             print("SpacesSink disabled due to missing credentials.")

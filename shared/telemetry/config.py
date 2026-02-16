@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
-from pathlib import Path
+
+from lib.storage.s3_compat import StorageConfig, get_storage_config, is_configured
 
 
 def _str_to_bool(value: str | None, default: bool = True) -> bool:
@@ -20,17 +21,12 @@ class TelemetryConfig:
     session_flush_seconds: int
     app_version: str
     max_buffer: int
-    spaces_bucket: str
-    spaces_region: str
-    spaces_endpoint: str
-    spaces_access_key_id: str
-    spaces_secret_access_key: str
-    spaces_prefix: str
+    storage: StorageConfig
 
 
 def _default_sink() -> str:
-    if os.environ.get("SPACES_BUCKET"):
-        return "stdout+spaces"
+    if is_configured(get_storage_config()):
+        return "stdout+r2"
     return "stdout"
 
 
@@ -43,10 +39,23 @@ def get_config() -> TelemetryConfig:
         session_flush_seconds=int(os.environ.get("LOG_SESSION_FLUSH_SECONDS", "60")),
         app_version=os.environ.get("APP_VERSION", "dev"),
         max_buffer=int(os.environ.get("LOG_MAX_BUFFER", "1000")),
-        spaces_bucket=os.environ.get("SPACES_BUCKET", ""),
-        spaces_region=os.environ.get("SPACES_REGION", ""),
-        spaces_endpoint=os.environ.get("SPACES_ENDPOINT", ""),
-        spaces_access_key_id=os.environ.get("SPACES_ACCESS_KEY_ID", ""),
-        spaces_secret_access_key=os.environ.get("SPACES_SECRET_ACCESS_KEY", ""),
-        spaces_prefix=os.environ.get("SPACES_PREFIX", "telemetry/"),
+        storage=get_storage_config(),
     )
+
+
+_WARNED_UNCONFIGURED = False
+
+
+def warn_if_unconfigured() -> None:
+    global _WARNED_UNCONFIGURED
+    if _WARNED_UNCONFIGURED:
+        return
+    config = get_config()
+    sink_flag = config.sink.lower()
+    if not config.enabled:
+        return
+    if any(token in sink_flag for token in ("r2", "spaces", "s3")) and not is_configured(
+        config.storage
+    ):
+        print("Warning: LOG_SINK requests object storage but R2/Spaces is not configured.")
+        _WARNED_UNCONFIGURED = True

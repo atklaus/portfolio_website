@@ -9,6 +9,7 @@ from typing import Any
 import streamlit as st
 
 from .config import TelemetryConfig, get_config
+from shared.logging.ops import set_log_context
 from .session import (
     ensure_session_id,
     ensure_session_started,
@@ -94,9 +95,11 @@ def log_event(
         return
     try:
         ensure_session_started()
+        session_id = ensure_session_id()
+        set_log_context(page=page, session_id=session_id)
         event = {
             "ts_utc": _utc_now_iso(),
-            "session_id": ensure_session_id(),
+            "session_id": session_id,
             "page": page,
             "event_type": event_type,
             "duration_ms": duration_ms,
@@ -111,7 +114,9 @@ def log_event(
         ) >= config.flush_seconds:
             _flush_events(config)
         last_session_flush = _state().get("telemetry_last_session_flush", 0)
-        if event_type == "page_view" or (now - last_session_flush) >= config.session_flush_seconds:
+        if event_type in ("session_start", "session_flush") or (
+            now - last_session_flush
+        ) >= config.session_flush_seconds:
             _flush_session_snapshot(config)
     except Exception as exc:
         print(f"Telemetry log_event failed: {exc}")
@@ -183,6 +188,7 @@ def instrument_page(page: str) -> None:
     if not config.enabled:
         return
     ensure_session_started()
+    set_log_context(page=page, session_id=ensure_session_id())
     state = _state()
     if not state.get("telemetry_session_start_logged"):
         log_event("session_start", page, payload={})

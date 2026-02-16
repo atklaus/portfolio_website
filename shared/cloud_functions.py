@@ -17,6 +17,7 @@ import extra_streamlit_components as stx
 from dotenv import load_dotenv
 
 from app.config import LOCAL_DEV
+from lib.storage.s3_compat import get_storage_config, is_configured
 
 load_dotenv()
 
@@ -58,20 +59,29 @@ class CloudFunctions:
         self.prefix = prefix
         self.webhook_id = webhook_id
 
-
-        access_key = _get_secret_value("DO_SPACES_KEY")
-        secret_key = _get_secret_value("DO_SPACES_SECRET")
-        region = os.environ.get("DO_SPACES_REGION", "nyc3")
-        endpoint_url = os.environ.get(
-            "DO_SPACES_ENDPOINT", f"https://{region}.digitaloceanspaces.com"
-        )
-        bucket_endpoint_url = os.environ.get(
-            "DO_SPACES_BUCKET_ENDPOINT", f"https://{bucket}.{region}.digitaloceanspaces.com"
-        )
+        storage_config = get_storage_config()
+        if is_configured(storage_config):
+            access_key = storage_config.access_key_id
+            secret_key = storage_config.secret_access_key
+            region = storage_config.region or "auto"
+            endpoint_url = storage_config.endpoint_url
+            bucket_endpoint_url = storage_config.endpoint_url
+            if not self.bucket:
+                self.bucket = storage_config.bucket
+        else:
+            access_key = _get_secret_value("DO_SPACES_KEY")
+            secret_key = _get_secret_value("DO_SPACES_SECRET")
+            region = os.environ.get("DO_SPACES_REGION", "nyc3")
+            endpoint_url = os.environ.get(
+                "DO_SPACES_ENDPOINT", f"https://{region}.digitaloceanspaces.com"
+            )
+            bucket_endpoint_url = os.environ.get(
+                "DO_SPACES_BUCKET_ENDPOINT", f"https://{self.bucket}.{region}.digitaloceanspaces.com"
+            )
 
         self.client = boto3.client(
             "s3",
-            config=botocore.config.Config(s3={"addressing_style": "virtual"}),
+            config=botocore.config.Config(s3={"addressing_style": "path"}),
             region_name=region,
             endpoint_url=endpoint_url,
             aws_access_key_id=access_key,
@@ -95,6 +105,7 @@ class CloudFunctions:
             endpoint_url=bucket_endpoint_url,
             aws_access_key_id=access_key,
             aws_secret_access_key=secret_key,
+            config=botocore.config.Config(s3={"addressing_style": "path"}),
         )
 
 
@@ -104,6 +115,7 @@ class CloudFunctions:
             endpoint_url=bucket_endpoint_url,
             aws_access_key_id=access_key,
             aws_secret_access_key=secret_key,
+            config=botocore.config.Config(s3={"addressing_style": "path"}),
         )
 
         # self.s3_resource = session.resource('s3')
@@ -334,7 +346,5 @@ class CloudFunctions:
         data['result'] = df.to_dict('records')
         data['created_at'] = str(datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S%z"))
         return data
-
-
 
 

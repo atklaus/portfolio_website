@@ -4,9 +4,13 @@ import streamlit.components.v1 as components
 from lib.analytics import inject_ga4
 from shared.pages import get_pages
 from shared.seo import ensure_sitemap
+from shared.logging.ops import configure_logging
 from shared.settings import get_settings
+from shared.telemetry.config import warn_if_unconfigured
 
 settings = get_settings()
+configure_logging(settings.logging_level)
+warn_if_unconfigured()
 
 st.set_page_config(
     page_title=settings.app_name,

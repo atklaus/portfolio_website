@@ -17,6 +17,5 @@ services:
       SPACES_ENDPOINT: "https://nyc3.digitaloceanspaces.com"
       SPACES_ACCESS_KEY_ID: "your-access-key"
       SPACES_SECRET_ACCESS_KEY: "your-secret-key"
-      SPACES_PREFIX: "telemetry/"
     volumes:
       - /var/lib/databuilds/data:/app/data

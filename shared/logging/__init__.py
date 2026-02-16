@@ -7,6 +7,7 @@ from .telemetry import (
     log_page_view,
     track_timing,
 )
+from .ops import configure_logging, set_log_context
 
 __all__ = [
     "TelemetryConfig",
@@ -16,4 +17,6 @@ __all__ = [
     "log_event",
     "log_page_view",
     "track_timing",
+    "configure_logging",
+    "set_log_context",
 ]
