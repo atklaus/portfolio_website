@@ -18,7 +18,7 @@ RUN apt-get update && \
     rm -rf /var/lib/apt/lists/*
 
 # Install Poetry + export plugin
-RUN pip install --no-cache-dir "poetry==1.7.1" "poetry-plugin-export==1.7.1"
+RUN pip install --no-cache-dir "poetry==1.8.2" "poetry-plugin-export==1.7.1"
 
 # Export and install dependencies into a virtualenv
 WORKDIR /tmp
