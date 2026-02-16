@@ -2,7 +2,10 @@ name: ci
 
 on:
   push:
+    branches:
+      - master
   pull_request:
+  workflow_dispatch:
 
 jobs:
   test:
@@ -26,3 +29,18 @@ jobs:
       - name: Run tests
         run: |
           poetry run pytest projects/bibclean/tests
+
+  deploy:
+    # Deploy only on pushes to master, never on PRs.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+      # Install flyctl via the official action
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+      # Deploy using the Fly API token stored in repo secrets
+      - name: Deploy to Fly.io
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: fly deploy --remote-only

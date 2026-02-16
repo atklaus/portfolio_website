@@ -74,6 +74,12 @@ If root access does not resolve, add a Cloudflare Transform Rule:
 - Rewrite `/robots.txt` to `/static/robots.txt`
 - Rewrite `/sitemap.xml` to `/static/sitemap.xml`
 
+## Fly.io Deployments
+Deployments run on every push to `master` via GitHub Actions.
+1. Create a Fly deploy token: `fly tokens create deploy -x 999999h`
+2. Add the token as a GitHub repo secret: `FLY_API_TOKEN`
+3. Push to `master` to trigger `fly deploy --remote-only`
+
 ## Telemetry Logging (DigitalOcean Spaces)
 Telemetry is shipped to Spaces as compressed JSONL event logs and optional Parquet session rollups.
 
