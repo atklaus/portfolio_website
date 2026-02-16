@@ -20,7 +20,7 @@ RUN apt-get update && \
     rm -rf /var/lib/apt/lists/*
 
 # Install Poetry
-RUN pip install --no-cache-dir "poetry==1.8.2"
+RUN pip install --no-cache-dir "poetry==2.0.1"
 
 WORKDIR /app
 COPY pyproject.toml poetry.lock ./
