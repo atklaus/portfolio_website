@@ -16,26 +16,24 @@ from projects.bibclean.apply.wos_apply import apply_mapping_to_wos_records
 from projects.bibclean.canonicalize import canonicalize_references
 from projects.bibclean.io.detect import detect_input_format
 from projects.bibclean.io.scopus_csv import (
+    build_documents_from_scopus,
+    extract_scopus_references,
+    load_scopus_csv,
+)
+from projects.bibclean.io.wos_plaintext import (
+    WosFile,
+    build_documents_from_wos,
+    extract_wos_references,
+    parse_wos_plaintext,
+    write_wos_plaintext,
+)
+from projects.bibclean.match.cluster import UnionFind
+from projects.bibclean.merge import compute_canonical_doc_id, merge_documents
+from projects.bibclean.normalize.parse import extract_doi
 from shared.telemetry import page_guard
 
+
 with page_guard(os.path.basename(__file__)):
-        build_documents_from_scopus,
-        extract_scopus_references,
-        load_scopus_csv,
-    )
-    from projects.bibclean.io.wos_plaintext import (
-        WosFile,
-        build_documents_from_wos,
-        extract_wos_references,
-        parse_wos_plaintext,
-        write_wos_plaintext,
-    )
-    from projects.bibclean.match.cluster import UnionFind
-    from projects.bibclean.merge import compute_canonical_doc_id, merge_documents
-    from projects.bibclean.normalize.parse import extract_doi
-
-
-
     page_header("Bibliometrix Reference Cleaner", page_name=os.path.basename(__file__))
 
     st.markdown("## Bibliometrix Reference Cleaner")
