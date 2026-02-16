@@ -1,0 +1,39 @@
+# fly.toml - Streamlit portfolio app configuration
+
+app = "streamlit-portfolio"
+
+# Primary process group for the app
+[processes]
+  app = "streamlit run app.py --server.address=0.0.0.0 --server.port=8501"
+
+# HTTP service exposing Streamlit on port 8501
+[http_service]
+  internal_port = 8501
+  force_https = true
+  auto_stop_machines = true
+  auto_start_machines = true
+  min_machines_running = 1
+
+  # Basic request concurrency limits
+  [http_service.concurrency]
+    type = "requests"
+    soft_limit = 20
+    hard_limit = 25
+
+  # Health check for the HTTP service
+  [[http_service.checks]]
+    interval = "15s"
+    timeout = "5s"
+    grace_period = "10s"
+    method = "GET"
+    path = "/"
+    protocol = "http"
+
+# Optional runtime environment (secrets should be set via `fly secrets set`)
+[env]
+  STREAMLIT_SERVER_HEADLESS = "true"
+  STREAMLIT_SERVER_ENABLE_CORS = "false"
+
+# Deployment strategy for safe rollouts
+[deploy]
+  strategy = "rolling"

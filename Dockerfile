@@ -1,5 +1,5 @@
 # Use an official Python runtime as a parent image
-FROM python:3.10-slim as base
+FROM python:3.10-slim-bookworm as base
 
 # Setup env
 ENV LANG C.UTF-8
@@ -8,8 +8,10 @@ ENV PYTHONDONTWRITEBYTECODE 1
 ENV PYTHONFAULTHANDLER 1
 ENV PIP_NO_CACHE_DIR=1
 ENV PIP_DISABLE_PIP_VERSION_CHECK=1
+ENV POETRY_NO_INTERACTION=1
+ENV POETRY_VIRTUALENVS_CREATE=false
 
-FROM base AS python-deps
+FROM base AS builder
 
 # System deps for building wheels (only in build stage)
 RUN apt-get update && \
@@ -17,22 +19,23 @@ RUN apt-get update && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
-# Install Poetry + export plugin
-RUN pip install --no-cache-dir "poetry==1.8.2" "poetry-plugin-export==1.7.1"
+# Install Poetry
+RUN pip install --no-cache-dir "poetry==1.8.2"
 
-# Export and install dependencies into a virtualenv
-WORKDIR /tmp
+WORKDIR /app
 COPY pyproject.toml poetry.lock ./
-RUN python -m venv /opt/venv && \
-    . /opt/venv/bin/activate && \
-    poetry export -f requirements.txt --output requirements.txt --without-hashes && \
-    pip install --no-cache-dir -r requirements.txt
+RUN poetry install --only main --no-root
 
 FROM base AS runtime
 
-# Copy virtual env from python-deps stage
-COPY --from=python-deps /opt/venv /opt/venv
-ENV PATH="/opt/venv/bin:$PATH"
+# Runtime libs only
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends libgl1 && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
+
+# Copy installed deps
+COPY --from=builder /usr/local /usr/local
 
 # Create a user and set work directory
 RUN useradd --create-home appuser
@@ -46,4 +49,4 @@ COPY --chown=appuser . .
 EXPOSE 8501
 
 # Run the application
-ENTRYPOINT ["streamlit", "run", "app.py"]
+ENTRYPOINT ["streamlit", "run", "app.py", "--server.address=0.0.0.0", "--server.port=8501"]

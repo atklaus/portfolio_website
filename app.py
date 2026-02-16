@@ -42,6 +42,7 @@ with st.sidebar:
 PAGES = [
     st.Page(page.file, title=page.title, icon=page.icon, default=page.key == "home")
     for page in get_pages()
+    if page.include_in_nav
 ]
 
 nav = st.navigation(PAGES, position="hidden")

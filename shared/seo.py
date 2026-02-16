@@ -23,7 +23,11 @@ def apply_page_meta(page_name: str) -> None:
 
 def _sitemap_xml() -> str:
     settings = get_settings()
-    urls = [page_url(page, settings.site_url) for page in get_pages() if page.include_in_sitemap]
+    urls = [
+        page_url(page, settings.site_url)
+        for page in get_pages()
+        if page.include_in_sitemap
+    ]
     lines = ["<?xml version=\"1.0\" encoding=\"UTF-8\"?>", "<urlset xmlns=\"http://www.sitemaps.org/schemas/sitemap/0.9\">"]
     lines.extend([f"  <url><loc>{url}</loc></url>" for url in urls])
     lines.append("</urlset>")
