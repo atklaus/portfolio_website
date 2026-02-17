@@ -209,13 +209,12 @@ def instrument_page_safe(page: str, fn):
 
 @contextmanager
 def page_guard(page: str):
-    """Guard a page body to ensure exceptions are logged even if Streamlit catches them."""
+    """Guard a page body to ensure telemetry is initialized before page rendering."""
     try:
         log_mem(f"page_start:{page}")
         instrument_page(page)
         yield
-    except Exception as exc:
-        log_error(page, exc)
+    except Exception:
         raise
     finally:
         log_mem(f"page_end:{page}")

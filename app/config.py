@@ -66,4 +66,13 @@ MOD_ACCESS = {
     ,'tags': ('Data Engineering', 'ETL', 'Fuzzy Matching', 'Record Linkage')
     }
 
+    ,'telemetry_admin': {
+    'button': '🧭 Site Analytics'
+    ,'name': 'telemetry_admin'
+    ,'description': 'Telemetry admin and site analytics.'
+    ,'group': 'admin'
+    ,'hidden': True
+    ,'enabled': os.environ.get("MOD_ADMIN_ENABLED", "").strip().lower() in {"1", "true", "yes", "y"}
+    }
+
     }

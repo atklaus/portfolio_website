@@ -29,18 +29,13 @@ _OVERRIDES: dict[str, dict[str, object]] = {
         "icon": "🏠",
         "description": "End-to-end data products, pipelines, and applied ML with production-grade reliability.",
     },
-    "analytics": {
-        "title": "Analytics",
-        "icon": "📈",
-        "description": "Usage metrics and app activity summaries.",
-    },
     "telemetry_admin": {
         "key": "telemetry",
-        "title": "Telemetry",
+        "title": "Site Analytics",
         "icon": "🧭",
         "description": "Telemetry admin and storage diagnostics.",
         "include_in_sitemap": False,
-        "include_in_nav": False,
+        "include_in_nav": True,
     },
 }
 
@@ -86,13 +81,16 @@ def _parse_page(path: Path, mods: dict[str, dict]) -> tuple[int, str, PageDef]:
 
     override = _OVERRIDES.get(slug, {})
     key = override.get("key", slug)
+    include_in_nav = bool(override.get("include_in_nav", True))
+    if mod and isinstance(mod, dict) and mod.get("enabled") is False:
+        include_in_nav = False
     page = PageDef(
         key=str(key),
         file=str(Path("pages") / path.name),
         title=str(override.get("title", title)),
         icon=str(override.get("icon", icon)),
         description=str(override.get("description", description)),
-        include_in_nav=bool(override.get("include_in_nav", True)),
+        include_in_nav=include_in_nav,
         include_in_sitemap=bool(override.get("include_in_sitemap", True)),
     )
     return order, slug, page

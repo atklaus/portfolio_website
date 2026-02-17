@@ -83,6 +83,12 @@ class R2LogHandler(logging.Handler):
             message = record.getMessage()
         except Exception:
             message = str(record.msg)
+        if record.exc_info:
+            try:
+                exc_text = logging.Formatter().formatException(record.exc_info)
+                message = f"{message}\n{exc_text}"
+            except Exception:
+                pass
         message = _sanitize_message(message, self.redactions)
         context_page, context_session = _get_log_context()
         page = getattr(record, "page", "") or context_page

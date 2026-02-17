@@ -66,6 +66,8 @@ with page_guard(os.path.basename(__file__)):
     fun_cards = []
     for mod in show_mod_dict.keys():
         mod_entry = show_mod_dict[mod]
+        if mod_entry.get("hidden") or (mod_entry.get("group") or "").lower() == "admin":
+            continue
         icon, title = _split_label(mod_entry["button"])
         icon = ICON_OVERRIDES.get(mod_entry["name"], icon)
         tags = tuple(mod_entry.get("tags", ()))

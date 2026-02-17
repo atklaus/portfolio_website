@@ -2,6 +2,7 @@ import streamlit as st
 import streamlit.components.v1 as components
 
 from lib.analytics import inject_ga4
+from lib.errors.boundary import get_app_env, run_with_error_boundary
 from lib.ops.memory import log_mem
 from shared.pages import get_pages
 from shared.seo import ensure_sitemap
@@ -20,6 +21,11 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="collapsed",
 )
+if get_app_env() == "prod":
+    try:
+        st.set_option("client.showErrorDetails", False)
+    except Exception:
+        pass
 
 
 def _maybe_redirect_static() -> None:
@@ -38,19 +44,22 @@ def _maybe_redirect_static() -> None:
         pass
 
 
-_maybe_redirect_static()
-inject_ga4(settings.ga_measurement_id)
-ensure_sitemap()
+def _render_app() -> None:
+    _maybe_redirect_static()
+    inject_ga4(settings.ga_measurement_id)
+    ensure_sitemap()
 
-with st.sidebar:
-    st.empty()
+    with st.sidebar:
+        st.empty()
 
-PAGES = [
-    st.Page(page.file, title=page.title, icon=page.icon, default=page.key == "home")
-    for page in get_pages()
-    if page.include_in_nav
-]
+    pages = [
+        st.Page(page.file, title=page.title, icon=page.icon, default=page.key == "home")
+        for page in get_pages()
+        if page.include_in_nav
+    ]
+    nav = st.navigation(pages, position="hidden")
+    nav.run()
 
-nav = st.navigation(PAGES, position="hidden")
-nav.run()
+
+run_with_error_boundary(_render_app, page_id="navigation", context={})
 log_mem("app_after_nav")

@@ -107,7 +107,26 @@ def get_bucket(config: StorageConfig | None = None) -> str:
 
 
 def endpoint_url(config: StorageConfig | None = None) -> str:
-    return (config or get_storage_config()).endpoint_url
+    return _normalize_endpoint_url((config or get_storage_config()).endpoint_url)
+
+
+def _normalize_endpoint_url(value: str) -> str:
+    if not value:
+        return ""
+    if value.startswith("http://") or value.startswith("https://"):
+        return value
+    return f"https://{value}"
+
+
+def _normalize_endpoint_host(value: str) -> str:
+    if not value:
+        return ""
+    if value.startswith("http://"):
+        value = value[len("http://") :]
+    elif value.startswith("https://"):
+        value = value[len("https://") :]
+    value = value.lstrip("/")
+    return value.rstrip("/")
 
 
 def _build_client(cfg: StorageConfig):
@@ -116,10 +135,11 @@ def _build_client(cfg: StorageConfig):
     import boto3
     import botocore.config
 
+    endpoint = _normalize_endpoint_url(cfg.endpoint_url)
     return boto3.client(
         "s3",
         region_name=cfg.region or None,
-        endpoint_url=cfg.endpoint_url or None,
+        endpoint_url=endpoint or None,
         aws_access_key_id=cfg.access_key_id or None,
         aws_secret_access_key=cfg.secret_access_key or None,
         config=botocore.config.Config(s3={"addressing_style": "path"}),
@@ -150,12 +170,14 @@ def duckdb_httpfs_config(config: StorageConfig | None = None) -> dict[str, Any]:
     cfg = config or get_storage_config()
     if not cfg.is_configured():
         return {}
+    raw_endpoint = cfg.endpoint_url
+    endpoint_host = _normalize_endpoint_host(raw_endpoint)
     use_ssl = True
-    if cfg.endpoint_url:
-        use_ssl = cfg.endpoint_url.startswith("https://")
+    if raw_endpoint:
+        use_ssl = not raw_endpoint.startswith("http://")
     return {
         "s3_region": cfg.region,
-        "s3_endpoint": cfg.endpoint_url,
+        "s3_endpoint": endpoint_host,
         "s3_access_key_id": cfg.access_key_id,
         "s3_secret_access_key": cfg.secret_access_key,
         "s3_url_style": "path",
