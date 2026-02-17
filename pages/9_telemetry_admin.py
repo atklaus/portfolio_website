@@ -115,32 +115,105 @@ def _events_parquet_globs_for_range(
     end_date: datetime.date,
     use_storage: bool,
     storage_config,
-) -> tuple[list[str], list[str]]:
+    strategy: str | None = None,
+) -> tuple[list[str], str]:
     days = _date_range_list(start_date, end_date)
-    missing: list[str] = []
-    globs: list[str] = []
+    if strategy is None:
+        strategy = "daily" if len(days) <= 31 else "broad"
+
     if use_storage:
-        for day in days:
-            prefix = f"telemetry/events_parquet/date={day.isoformat()}/"
-            if _prefix_has_objects(prefix, storage_config):
-                globs.append(
+        if strategy == "broad":
+            return (
+                [
                     s3_url(
-                        f"{prefix}*.parquet",
+                        "telemetry/events_parquet/date=*/*.parquet",
                         storage_config,
                     )
-                )
-            else:
-                missing.append(day.isoformat())
-        return globs, missing
+                ],
+                "broad",
+            )
+        globs = [
+            s3_url(
+                f"telemetry/events_parquet/date={day.isoformat()}/*.parquet",
+                storage_config,
+            )
+            for day in days
+        ]
+        return globs, "daily"
 
     log_dir = Path("data/logs") / "events_parquet"
-    for day in days:
-        path = log_dir / f"date={day.isoformat()}" / "*.parquet"
-        if list(path.parent.glob(path.name)):
-            globs.append(str(path))
-        else:
-            missing.append(day.isoformat())
-    return globs, missing
+    if strategy == "broad":
+        return [str(log_dir / "date=*" / "*.parquet")], "broad"
+    return [str(log_dir / f"date={day.isoformat()}" / "*.parquet") for day in days], "daily"
+
+
+def _events_range_key(start_date: datetime.date, end_date: datetime.date) -> str:
+    return f"{start_date.isoformat()}_{end_date.isoformat()}"
+
+
+def _parquet_partial_key(range_key: str) -> str:
+    return f"events_parquet_partial_{range_key}"
+
+
+def _parquet_unavailable_key(range_key: str) -> str:
+    return f"events_parquet_unavailable_{range_key}"
+
+
+def _parquet_partial(range_key: str | None) -> bool:
+    if not range_key:
+        return False
+    return bool(st.session_state.get(_parquet_partial_key(range_key)))
+
+
+def _parquet_unavailable(range_key: str | None) -> bool:
+    if not range_key:
+        return False
+    return bool(st.session_state.get(_parquet_unavailable_key(range_key)))
+
+
+def _mark_parquet_partial(range_key: str | None) -> None:
+    if range_key:
+        st.session_state[_parquet_partial_key(range_key)] = True
+
+
+def _mark_parquet_unavailable(range_key: str | None) -> None:
+    if range_key:
+        st.session_state[_parquet_unavailable_key(range_key)] = True
+
+
+def _is_missing_parquet_error(exc: Exception) -> bool:
+    message = str(exc).lower()
+    return "no files found" in message
+
+
+def _events_parquet_source_for_range(
+    start_date: datetime.date,
+    end_date: datetime.date,
+    use_storage: bool,
+    storage_config,
+    range_key: str | None = None,
+    strategy: str | None = None,
+) -> dict[str, Any]:
+    globs, strategy = _events_parquet_globs_for_range(
+        start_date, end_date, use_storage, storage_config, strategy=strategy
+    )
+    relation = _read_parquet_relation(globs)
+    return {
+        "source": "parquet",
+        "relation": relation,
+        "strategy": strategy,
+        "range_key": range_key,
+        "start_date": start_date,
+        "end_date": end_date,
+        "columns": {
+            "ts": "ts",
+            "event": "event_name",
+            "page": "page_id",
+            "session": "session_id",
+            "trace_expr": "trace_id",
+            "payload": "payload_json",
+        },
+    }
 
 
 def _events_source_for_range(
@@ -149,40 +222,33 @@ def _events_source_for_range(
     use_storage: bool,
     storage_config,
 ) -> dict[str, Any]:
-    parquet_globs, missing = _events_parquet_globs_for_range(
-        start_date, end_date, use_storage, storage_config
-    )
-    if parquet_globs and not missing:
-        union = _union_read_parquet(parquet_globs)
-        return {
-            "source": "parquet",
-            "union": union,
-            "missing": [],
-            "columns": {
-                "ts": "ts",
-                "event": "event_name",
-                "page": "page_id",
-                "session": "session_id",
-                "trace": "trace_id",
-                "payload": "payload_json",
-            },
-        }
-
+    range_key = _events_range_key(start_date, end_date)
     json_globs = _event_globs_for_range(start_date, end_date, use_storage, storage_config)
-    union = _union_read_json(json_globs)
-    return {
+    json_relation = _union_read_json(json_globs)
+    json_source = {
         "source": "json",
-        "union": union,
-        "missing": missing,
+        "relation": json_relation,
+        "range_key": range_key,
         "columns": {
             "ts": "ts_utc",
             "event": "event_type",
             "page": "page",
             "session": "session_id",
-            "trace": "trace_id",
+            "trace_expr": "json_extract_string(to_json(payload), '$.trace_id')",
             "payload": "payload",
         },
     }
+
+    if _parquet_unavailable(range_key):
+        return json_source
+
+    parquet_source = _events_parquet_source_for_range(
+        start_date, end_date, use_storage, storage_config, range_key=range_key
+    )
+    if not parquet_source.get("relation"):
+        return json_source
+    parquet_source["fallback"] = json_source
+    return parquet_source
 
 
 @st.cache_data(ttl=300, max_entries=10)
@@ -221,11 +287,10 @@ def _union_read_json(globs: list[str]) -> tuple[str, tuple[Any, ...]] | None:
     return " UNION ALL ".join(parts), tuple(globs)
 
 
-def _union_read_parquet(globs: list[str]) -> tuple[str, tuple[Any, ...]] | None:
+def _read_parquet_relation(globs: list[str]) -> tuple[str, tuple[Any, ...]] | None:
     if not globs:
         return None
-    parts = ["SELECT * FROM read_parquet(? )"] * len(globs)
-    return " UNION ALL ".join(parts), tuple(globs)
+    return "SELECT * FROM read_parquet(?, union_by_name=true)", (globs,)
 
 
 def _handle_query_error(exc: Exception, page_id: str) -> None:
@@ -254,6 +319,8 @@ def _duckdb_connection(httpfs_items: tuple[tuple[str, Any], ...]):
     import duckdb
 
     con = duckdb.connect()
+    con.execute("PRAGMA threads=4")
+    con.execute("SET preserve_insertion_order=false")
     if httpfs_items:
         con.execute("INSTALL httpfs")
         con.execute("LOAD httpfs")
@@ -295,6 +362,56 @@ def _query_value(
     con = _duckdb_connection(httpfs_items)
     row = con.execute(query, params).fetchone()
     return row[0] if row else None
+
+
+def _execute_events_query(
+    source: dict[str, Any],
+    build_query,
+    use_storage: bool,
+    storage_config,
+    *,
+    value_only: bool = False,
+):
+    def _run(src: dict[str, Any]):
+        query, params = build_query(src)
+        if value_only:
+            return _query_value(query, params, use_storage, storage_config)
+        return _query_df(query, params, use_storage, storage_config)
+
+    try:
+        return _run(source)
+    except Exception as exc:
+        if source.get("source") != "parquet" or not _is_missing_parquet_error(exc):
+            raise
+        range_key = source.get("range_key")
+        fallback = source.get("fallback")
+        start_date = source.get("start_date")
+        end_date = source.get("end_date")
+        if start_date and end_date and source.get("strategy") == "daily":
+            broad_source = _events_parquet_source_for_range(
+                start_date,
+                end_date,
+                use_storage,
+                storage_config,
+                range_key=range_key,
+                strategy="broad",
+            )
+            broad_source["fallback"] = fallback
+            try:
+                result = _run(broad_source)
+            except Exception as exc2:
+                if _is_missing_parquet_error(exc2):
+                    _mark_parquet_unavailable(range_key)
+                    if fallback and fallback.get("relation"):
+                        return _run(fallback)
+                raise
+            _mark_parquet_partial(range_key)
+            return result
+
+        _mark_parquet_unavailable(range_key)
+        if fallback and fallback.get("relation"):
+            return _run(fallback)
+        raise
 
 
 def _safe_date_range(date_range: Any) -> tuple[datetime.date, datetime.date] | None:
@@ -351,11 +468,11 @@ def _fetch_sessions_count(
     storage_config,
 ) -> int | None:
     session_globs = _session_globs_for_range(start_date, end_date, use_storage, storage_config)
-    union = _union_read_parquet(session_globs)
+    relation = _read_parquet_relation(session_globs)
     try:
-        if not union:
+        if not relation:
             raise RuntimeError("No session globs")
-        union_sql, union_params = union
+        union_sql, union_params = relation
         return _query_value(
             f"""
             SELECT COUNT(DISTINCT session_id)
@@ -368,22 +485,26 @@ def _fetch_sessions_count(
         )
     except Exception:
         source = _events_source_for_range(start_date, end_date, use_storage, storage_config)
-        union = source.get("union")
-        if not union:
-            return None
-        union_sql, union_params = union
-        ts_col = source["columns"]["ts"]
-        session_col = source["columns"]["session"]
-        try:
-            return _query_value(
-                f"""
+        def _build(src: dict[str, Any]):
+            relation = src.get("relation")
+            if not relation:
+                raise RuntimeError("No event relation")
+            union_sql, union_params = relation
+            ts_col = src["columns"]["ts"]
+            session_col = src["columns"]["session"]
+            query = f"""
                 SELECT COUNT(DISTINCT {session_col})
-                FROM ({union_sql})
+                FROM (
+                    SELECT {ts_col}, {session_col}
+                    FROM ({union_sql})
+                )
                 WHERE CAST({ts_col} AS DATE) BETWEEN ? AND ?
-                """,
-                (*union_params, str(start_date), str(end_date)),
-                use_storage,
-                storage_config,
+            """
+            return query, (*union_params, str(start_date), str(end_date))
+
+        try:
+            return _execute_events_query(
+                source, _build, use_storage, storage_config, value_only=True
             )
         except Exception:
             return None
@@ -397,23 +518,28 @@ def _fetch_event_count(
     use_storage: bool,
     storage_config,
 ) -> int | None:
-    union = source.get("union")
-    if not union:
-        return None
-    union_sql, union_params = union
-    ts_col = source["columns"]["ts"]
     clause = "" if not where else f" AND {where}"
-    try:
-        return _query_value(
-            f"""
+
+    def _build(src: dict[str, Any]):
+        relation = src.get("relation")
+        if not relation:
+            raise RuntimeError("No event relation")
+        union_sql, union_params = relation
+        ts_col = src["columns"]["ts"]
+        event_col = src["columns"]["event"]
+        select_cols = ts_col if not where else f"{ts_col}, {event_col}"
+        query = f"""
             SELECT COUNT(*)
-            FROM ({union_sql})
+            FROM (
+                SELECT {select_cols}
+                FROM ({union_sql})
+            )
             WHERE CAST({ts_col} AS DATE) BETWEEN ? AND ?{clause}
-            """,
-            (*union_params, str(start_date), str(end_date)),
-            use_storage,
-            storage_config,
-        )
+        """
+        return query, (*union_params, str(start_date), str(end_date))
+
+    try:
+        return _execute_events_query(source, _build, use_storage, storage_config, value_only=True)
     except Exception:
         return None
 
@@ -426,11 +552,11 @@ def _fetch_sessions_daily(
     storage_config,
 ):
     session_globs = _session_globs_for_range(start_date, end_date, use_storage, storage_config)
-    union = _union_read_parquet(session_globs)
+    relation = _read_parquet_relation(session_globs)
     try:
-        if not union:
+        if not relation:
             raise RuntimeError("No session globs")
-        union_sql, union_params = union
+        union_sql, union_params = relation
         return _query_df(
             f"""
             SELECT date, COUNT(DISTINCT session_id) AS sessions
@@ -445,24 +571,29 @@ def _fetch_sessions_daily(
         )
     except Exception:
         source = _events_source_for_range(start_date, end_date, use_storage, storage_config)
-        union = source.get("union")
-        if not union:
+        def _build(src: dict[str, Any]):
+            relation = src.get("relation")
+            if not relation:
+                raise RuntimeError("No event relation")
+            union_sql, union_params = relation
+            ts_col = src["columns"]["ts"]
+            session_col = src["columns"]["session"]
+            query = f"""
+                SELECT CAST({ts_col} AS DATE) AS date, COUNT(DISTINCT {session_col}) AS sessions
+                FROM (
+                    SELECT {ts_col}, {session_col}
+                    FROM ({union_sql})
+                )
+                WHERE CAST({ts_col} AS DATE) BETWEEN ? AND ?
+                GROUP BY date
+                ORDER BY date
+            """
+            return query, (*union_params, str(start_date), str(end_date))
+
+        try:
+            return _execute_events_query(source, _build, use_storage, storage_config)
+        except Exception:
             return _query_df("SELECT NULL WHERE FALSE", tuple(), use_storage, storage_config)
-        union_sql, union_params = union
-        ts_col = source["columns"]["ts"]
-        session_col = source["columns"]["session"]
-        return _query_df(
-            f"""
-            SELECT CAST({ts_col} AS DATE) AS date, COUNT(DISTINCT {session_col}) AS sessions
-            FROM ({union_sql})
-            WHERE CAST({ts_col} AS DATE) BETWEEN ? AND ?
-            GROUP BY date
-            ORDER BY date
-            """,
-            (*union_params, str(start_date), str(end_date)),
-            use_storage,
-            storage_config,
-        )
 
 
 def _fetch_pageviews_daily(
@@ -472,25 +603,30 @@ def _fetch_pageviews_daily(
     use_storage: bool,
     storage_config,
 ):
-    union = source.get("union")
-    if not union:
+    def _build(src: dict[str, Any]):
+        relation = src.get("relation")
+        if not relation:
+            raise RuntimeError("No event relation")
+        union_sql, union_params = relation
+        ts_col = src["columns"]["ts"]
+        event_col = src["columns"]["event"]
+        query = f"""
+            SELECT CAST({ts_col} AS DATE) AS date, COUNT(*) AS pageviews
+            FROM (
+                SELECT {ts_col}, {event_col}
+                FROM ({union_sql})
+            )
+            WHERE {event_col} = 'page_view'
+              AND CAST({ts_col} AS DATE) BETWEEN ? AND ?
+            GROUP BY date
+            ORDER BY date
+        """
+        return query, (*union_params, str(start_date), str(end_date))
+
+    try:
+        return _execute_events_query(source, _build, use_storage, storage_config)
+    except Exception:
         return _query_df("SELECT NULL WHERE FALSE", tuple(), use_storage, storage_config)
-    union_sql, union_params = union
-    ts_col = source["columns"]["ts"]
-    event_col = source["columns"]["event"]
-    return _query_df(
-        f"""
-        SELECT CAST({ts_col} AS DATE) AS date, COUNT(*) AS pageviews
-        FROM ({union_sql})
-        WHERE {event_col} = 'page_view'
-          AND CAST({ts_col} AS DATE) BETWEEN ? AND ?
-        GROUP BY date
-        ORDER BY date
-        """,
-        (*union_params, str(start_date), str(end_date)),
-        use_storage,
-        storage_config,
-    )
 
 
 @st.cache_data(ttl=300, max_entries=10)
@@ -501,24 +637,26 @@ def _fetch_event_filters(
     use_storage: bool,
     storage_config,
 ):
-    try:
-        union = source.get("union")
-        if not union:
-            return [], []
-        union_sql, union_params = union
-        ts_col = source["columns"]["ts"]
-        event_col = source["columns"]["event"]
-        page_col = source["columns"]["page"]
-        df = _query_df(
-            f"""
+    def _build(src: dict[str, Any]):
+        relation = src.get("relation")
+        if not relation:
+            raise RuntimeError("No event relation")
+        union_sql, union_params = relation
+        ts_col = src["columns"]["ts"]
+        event_col = src["columns"]["event"]
+        page_col = src["columns"]["page"]
+        query = f"""
             SELECT DISTINCT {event_col} AS event_name, {page_col} AS page_id
-            FROM ({union_sql})
+            FROM (
+                SELECT {ts_col}, {event_col}, {page_col}
+                FROM ({union_sql})
+            )
             WHERE CAST({ts_col} AS DATE) BETWEEN ? AND ?
-            """,
-            (*union_params, str(start_date), str(end_date)),
-            use_storage,
-            storage_config,
-        )
+        """
+        return query, (*union_params, str(start_date), str(end_date))
+
+    try:
+        df = _execute_events_query(source, _build, use_storage, storage_config)
     except Exception:
         return [], []
 
@@ -570,56 +708,130 @@ def _fetch_events_slice(
     use_storage: bool,
     storage_config,
 ):
-    union = source.get("union")
-    if not union:
-        return _query_df("SELECT NULL WHERE FALSE", tuple(), use_storage, storage_config)
-    union_sql, union_params = union
-    columns = source["columns"]
-    where_clause, params = _build_events_query(
-        start_date,
-        end_date,
-        event_name,
-        page_id,
-        search_text,
-        columns,
-        source["source"],
-    )
-    ts_col = columns["ts"]
-    event_col = columns["event"]
-    page_col = columns["page"]
-    session_col = columns["session"]
-    payload_col = columns["payload"]
-    trace_col = columns["trace"]
-    if source["source"] == "parquet":
+    def _build(src: dict[str, Any]):
+        relation = src.get("relation")
+        if not relation:
+            raise RuntimeError("No event relation")
+        union_sql, union_params = relation
+        columns = src["columns"]
+        where_clause, params = _build_events_query(
+            start_date,
+            end_date,
+            event_name,
+            page_id,
+            search_text,
+            columns,
+            src["source"],
+        )
+        ts_col = columns["ts"]
+        event_col = columns["event"]
+        page_col = columns["page"]
+        session_col = columns["session"]
+        trace_expr = columns["trace_expr"]
+        if src["source"] == "parquet":
+            query = f"""
+                SELECT {ts_col} AS ts_utc,
+                       {event_col} AS event_type,
+                       {page_col} AS page,
+                       {session_col} AS session_id,
+                       NULL AS duration_ms,
+                       {trace_expr} AS trace_id
+                FROM ({union_sql})
+                WHERE {where_clause}
+                ORDER BY {ts_col} DESC
+                LIMIT ? OFFSET ?
+            """
+        else:
+            query = f"""
+                SELECT {ts_col} AS ts_utc,
+                       {event_col} AS event_type,
+                       {page_col} AS page,
+                       {session_col} AS session_id,
+                       duration_ms,
+                       {trace_expr} AS trace_id
+                FROM ({union_sql})
+                WHERE {where_clause}
+                ORDER BY {ts_col} DESC
+                LIMIT ? OFFSET ?
+            """
+        full_params = (*union_params, *params, int(limit), int(offset))
+        return query, full_params
+
+    return _execute_events_query(source, _build, use_storage, storage_config)
+
+
+def _is_null_value(value: Any) -> bool:
+    if value is None:
+        return True
+    try:
+        return value != value
+    except Exception:
+        return False
+
+
+def _fetch_event_payload(
+    source: dict[str, Any],
+    start_date: datetime.date,
+    end_date: datetime.date,
+    ts_value: Any,
+    event_name: Any,
+    page_id: Any,
+    session_id: Any,
+    trace_id: Any,
+    use_storage: bool,
+    storage_config,
+):
+    def _build(src: dict[str, Any]):
+        relation = src.get("relation")
+        if not relation:
+            raise RuntimeError("No event relation")
+        union_sql, union_params = relation
+        columns = src["columns"]
+        ts_col = columns["ts"]
+        event_col = columns["event"]
+        page_col = columns["page"]
+        session_col = columns["session"]
+        trace_expr = columns["trace_expr"]
+        payload_col = columns["payload"]
+
+        clauses: list[str] = [f"CAST({ts_col} AS DATE) BETWEEN ? AND ?"]
+        params: list[Any] = [str(start_date), str(end_date)]
+
+        if not _is_null_value(ts_value):
+            clauses.append(f"{ts_col} = ?")
+            params.append(ts_value)
+        if not _is_null_value(event_name):
+            clauses.append(f"{event_col} = ?")
+            params.append(event_name)
+        if _is_null_value(page_id):
+            clauses.append(f"{page_col} IS NULL")
+        else:
+            clauses.append(f"{page_col} = ?")
+            params.append(page_id)
+        if _is_null_value(session_id):
+            clauses.append(f"{session_col} IS NULL")
+        else:
+            clauses.append(f"{session_col} = ?")
+            params.append(session_id)
+        if _is_null_value(trace_id):
+            clauses.append(f"{trace_expr} IS NULL")
+        else:
+            clauses.append(f"{trace_expr} = ?")
+            params.append(trace_id)
+
         query = f"""
-            SELECT {ts_col} AS ts_utc,
-                   {event_col} AS event_type,
-                   {page_col} AS page,
-                   {session_col} AS session_id,
-                   NULL AS duration_ms,
-                   {trace_col} AS trace_id,
-                   {payload_col} AS payload
+            SELECT {payload_col} AS payload
             FROM ({union_sql})
-            WHERE {where_clause}
+            WHERE {" AND ".join(clauses)}
             ORDER BY {ts_col} DESC
-            LIMIT ? OFFSET ?
+            LIMIT 1
         """
-    else:
-        query = f"""
-            SELECT {ts_col} AS ts_utc,
-                   {event_col} AS event_type,
-                   {page_col} AS page,
-                   {session_col} AS session_id,
-                   duration_ms,
-                   json_extract_string(to_json(payload), '$.trace_id') AS trace_id,
-                   {payload_col} AS payload
-            FROM ({union_sql})
-            WHERE {where_clause}
-            ORDER BY {ts_col} DESC
-            LIMIT ? OFFSET ?
-        """
-    full_params = (*union_params, *params, int(limit), int(offset))
-    return _query_df(query, full_params, use_storage, storage_config)
+        return query, (*union_params, *params)
+
+    df = _execute_events_query(source, _build, use_storage, storage_config)
+    if df is None or df.empty:
+        return None
+    return df.iloc[0]["payload"]
 
 
 def _fetch_session_snapshot(
@@ -631,10 +843,10 @@ def _fetch_session_snapshot(
     today = _utc_today()
     start_date = today - timedelta(days=90)
     session_globs = _session_globs_for_range(start_date, today, use_storage, storage_config)
-    union = _union_read_parquet(session_globs)
-    if not union:
+    relation = _read_parquet_relation(session_globs)
+    if not relation:
         return _query_df("SELECT NULL WHERE FALSE", tuple(), use_storage, storage_config)
-    union_sql, union_params = union
+    union_sql, union_params = relation
     return _query_df(
         f"""
         SELECT ts_utc, date, event_count, error_count, pages_visited, last_page
@@ -657,48 +869,46 @@ def _fetch_session_events(
     use_storage: bool,
     storage_config,
 ):
-    union = source.get("union")
-    if not union:
-        return _query_df("SELECT NULL WHERE FALSE", tuple(), use_storage, storage_config)
-    union_sql, union_params = union
-    columns = source["columns"]
-    ts_col = columns["ts"]
-    event_col = columns["event"]
-    page_col = columns["page"]
-    session_col = columns["session"]
-    payload_col = columns["payload"]
-    if source["source"] == "parquet":
-        query = f"""
-            SELECT {ts_col} AS ts_utc,
-                   {event_col} AS event_type,
-                   {page_col} AS page,
-                   NULL AS duration_ms,
-                   {payload_col} AS payload
-            FROM ({union_sql})
-            WHERE {session_col} = ?
-              AND CAST({ts_col} AS DATE) BETWEEN ? AND ?
-            ORDER BY {ts_col} ASC
-            LIMIT 500
-        """
-    else:
-        query = f"""
-            SELECT {ts_col} AS ts_utc,
-                   {event_col} AS event_type,
-                   {page_col} AS page,
-                   duration_ms,
-                   {payload_col} AS payload
-            FROM ({union_sql})
-            WHERE {session_col} = ?
-              AND CAST({ts_col} AS DATE) BETWEEN ? AND ?
-            ORDER BY {ts_col} ASC
-            LIMIT 500
-        """
-    return _query_df(
-        query,
-        (*union_params, session_id, str(start_date), str(end_date)),
-        use_storage,
-        storage_config,
-    )
+    def _build(src: dict[str, Any]):
+        relation = src.get("relation")
+        if not relation:
+            raise RuntimeError("No event relation")
+        union_sql, union_params = relation
+        columns = src["columns"]
+        ts_col = columns["ts"]
+        event_col = columns["event"]
+        page_col = columns["page"]
+        session_col = columns["session"]
+        payload_col = columns["payload"]
+        if src["source"] == "parquet":
+            query = f"""
+                SELECT {ts_col} AS ts_utc,
+                       {event_col} AS event_type,
+                       {page_col} AS page,
+                       NULL AS duration_ms,
+                       {payload_col} AS payload
+                FROM ({union_sql})
+                WHERE {session_col} = ?
+                  AND CAST({ts_col} AS DATE) BETWEEN ? AND ?
+                ORDER BY {ts_col} ASC
+                LIMIT 500
+            """
+        else:
+            query = f"""
+                SELECT {ts_col} AS ts_utc,
+                       {event_col} AS event_type,
+                       {page_col} AS page,
+                       duration_ms,
+                       {payload_col} AS payload
+                FROM ({union_sql})
+                WHERE {session_col} = ?
+                  AND CAST({ts_col} AS DATE) BETWEEN ? AND ?
+                ORDER BY {ts_col} ASC
+                LIMIT 500
+            """
+        return query, (*union_params, session_id, str(start_date), str(end_date))
+
+    return _execute_events_query(source, _build, use_storage, storage_config)
 
 
 def _fetch_trace_events(
@@ -709,18 +919,18 @@ def _fetch_trace_events(
     use_storage: bool,
     storage_config,
 ):
-    union = source.get("union")
-    if not union:
-        return _query_df("SELECT NULL WHERE FALSE", tuple(), use_storage, storage_config)
-    union_sql, union_params = union
-    columns = source["columns"]
-    ts_col = columns["ts"]
-    event_col = columns["event"]
-    page_col = columns["page"]
-    session_col = columns["session"]
-    payload_col = columns["payload"]
-    trace_col = columns["trace"]
-    if source["source"] == "parquet":
+    def _build(src: dict[str, Any]):
+        relation = src.get("relation")
+        if not relation:
+            raise RuntimeError("No event relation")
+        union_sql, union_params = relation
+        columns = src["columns"]
+        ts_col = columns["ts"]
+        event_col = columns["event"]
+        page_col = columns["page"]
+        session_col = columns["session"]
+        payload_col = columns["payload"]
+        trace_expr = columns["trace_expr"]
         query = f"""
             SELECT {ts_col} AS ts_utc,
                    {event_col} AS event_type,
@@ -729,29 +939,13 @@ def _fetch_trace_events(
                    {payload_col} AS payload
             FROM ({union_sql})
             WHERE CAST({ts_col} AS DATE) BETWEEN ? AND ?
-              AND {trace_col} = ?
+              AND {trace_expr} = ?
             ORDER BY {ts_col} ASC
             LIMIT 200
         """
-    else:
-        query = f"""
-            SELECT {ts_col} AS ts_utc,
-                   {event_col} AS event_type,
-                   {page_col} AS page,
-                   {session_col} AS session_id,
-                   {payload_col} AS payload
-            FROM ({union_sql})
-            WHERE CAST({ts_col} AS DATE) BETWEEN ? AND ?
-              AND json_extract_string(to_json(payload), '$.trace_id') = ?
-            ORDER BY {ts_col} ASC
-            LIMIT 200
-        """
-    return _query_df(
-        query,
-        (*union_params, str(start_date), str(end_date), trace_id),
-        use_storage,
-        storage_config,
-    )
+        return query, (*union_params, str(start_date), str(end_date), trace_id)
+
+    return _execute_events_query(source, _build, use_storage, storage_config)
 
 
 with page_guard(os.path.basename(__file__)):
@@ -834,13 +1028,14 @@ with page_guard(os.path.basename(__file__)):
                 source_30d = _events_source_for_range(
                     start_30d, end_30d, use_storage, storage_config
                 )
-            if source_7d["source"] == "json" and source_7d["missing"]:
-                st.info(
-                    "Some dates aren't rolled up to Parquet yet, falling back to raw logs (slower)."
-                )
-            st.caption(
-                f"Data source: {'Parquet (fast)' if source_7d['source'] == 'parquet' else 'JSONL (slow)'}"
+            if _parquet_partial(source_7d.get("range_key")):
+                st.warning("Some partitions missing, results may be partial.")
+            source_label = (
+                "JSONL (slow)"
+                if source_7d["source"] == "json" or _parquet_unavailable(source_7d.get("range_key"))
+                else "Parquet (fast)"
             )
+            st.caption(f"Data source: {source_label}")
 
             sessions_7d = _fetch_sessions_count(
                 sessions_glob, start_7d, end_7d, use_storage, storage_config
@@ -951,12 +1146,15 @@ with page_guard(os.path.basename(__file__)):
         else:
             start_date, end_date = safe_range
             source = _events_source_for_range(start_date, end_date, use_storage, storage_config)
-            st.caption(f"Data source: {'Parquet (fast)' if source['source'] == 'parquet' else 'JSONL (slow)'}")
+            source_label = (
+                "JSONL (slow)"
+                if source["source"] == "json" or _parquet_unavailable(source.get("range_key"))
+                else "Parquet (fast)"
+            )
+            st.caption(f"Data source: {source_label}")
             query_allowed = True
-            if source["source"] == "json" and source["missing"]:
-                st.warning(
-                    "Some dates aren't rolled up to Parquet yet, falling back to raw logs (slower)."
-                )
+            if _parquet_partial(source.get("range_key")):
+                st.warning("Some partitions missing, results may be partial.")
             if source["source"] == "json" and (end_date - start_date).days > 7:
                 st.info("Reduce the range to 7 days or less for JSONL queries.")
                 query_allowed = False
@@ -1042,14 +1240,9 @@ with page_guard(os.path.basename(__file__)):
                         },
                     )
 
-                    export_df = events_df.copy()
-                    try:
-                        export_df["payload"] = export_df["payload"].apply(lambda value: str(value))
-                    except Exception:
-                        pass
                     st.download_button(
                         "Export CSV",
-                        data=export_df.to_csv(index=False),
+                        data=events_df.to_csv(index=False),
                         file_name="events_slice.csv",
                         mime="text/csv",
                     )
@@ -1060,15 +1253,34 @@ with page_guard(os.path.basename(__file__)):
                     ]
                     selected = st.selectbox("Event details", options, key="events_detail_select")
                     selected_idx = options.index(selected)
-                    payload = events_df.iloc[selected_idx]["payload"]
+                    selected_row = events_df.iloc[selected_idx]
+                    payload = None
+                    try:
+                        payload = _fetch_event_payload(
+                            source,
+                            start_date,
+                            end_date,
+                            selected_row["ts_utc"],
+                            selected_row["event_type"],
+                            selected_row["page"],
+                            selected_row["session_id"],
+                            selected_row["trace_id"],
+                            use_storage,
+                            storage_config,
+                        )
+                    except Exception as exc:
+                        _handle_query_error(exc, "telemetry_admin_event_payload")
                     with st.expander("Event payload", expanded=False):
-                        try:
-                            if isinstance(payload, str):
-                                st.json(json.loads(payload))
-                            else:
-                                st.json(payload)
-                        except Exception:
-                            st.code(str(payload))
+                        if payload is None:
+                            st.caption("No payload found.")
+                        else:
+                            try:
+                                if isinstance(payload, str):
+                                    st.json(json.loads(payload))
+                                else:
+                                    st.json(payload)
+                            except Exception:
+                                st.code(str(payload))
 
                     col_prev, col_next, col_note = st.columns([1, 1, 2])
                     with col_prev:
@@ -1091,10 +1303,8 @@ with page_guard(os.path.basename(__file__)):
 
         if lookup_value:
             source = _events_source_for_range(start_date, end_date, use_storage, storage_config)
-            if source["source"] == "json" and source["missing"]:
-                st.warning(
-                    "Some dates aren't rolled up to Parquet yet, falling back to raw logs (slower)."
-                )
+            if _parquet_partial(source.get("range_key")):
+                st.warning("Some partitions missing, results may be partial.")
             if source["source"] == "json" and (end_date - start_date).days > 7:
                 st.info("Reducing lookback to 7 days for JSONL queries.")
                 start_date = end_date - timedelta(days=6)

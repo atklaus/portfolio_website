@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from datetime import datetime, timezone
 from typing import Any
@@ -12,6 +13,7 @@ EVENT_COLUMNS = [
     "page_id",
     "session_id",
     "trace_id",
+    "event_id",
     "app_version",
     "instance_id",
     "user_agent",
@@ -135,12 +137,27 @@ def normalize_event(raw: dict) -> dict:
     except Exception:
         payload_json = json.dumps({"_payload": str(payload_obj)})
 
+    event_id = None
+    if ts and event_name:
+        seed = "|".join(
+            [
+                str(ts or ""),
+                str(session_id or ""),
+                str(event_name or ""),
+                str(page_id or ""),
+                str(trace_id or ""),
+            ]
+        )
+        payload_hash = hashlib.sha1(payload_json.encode("utf-8")).hexdigest()[:12]
+        event_id = hashlib.sha1(f"{seed}|{payload_hash}".encode("utf-8")).hexdigest()
+
     return {
         "ts": ts,
         "event_name": str(event_name) if event_name is not None else None,
         "page_id": str(page_id) if page_id is not None else None,
         "session_id": str(session_id) if session_id is not None else None,
         "trace_id": str(trace_id) if trace_id is not None else None,
+        "event_id": event_id,
         "app_version": str(app_version) if app_version is not None else None,
         "instance_id": str(instance_id) if instance_id is not None else None,
         "user_agent": user_agent,

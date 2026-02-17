@@ -20,7 +20,13 @@ import pandas as pd
 
 from lib.storage import io as storage_io
 from lib.storage import paths as storage_paths
-from lib.storage.s3_compat import get_bucket, get_client, get_storage_config, is_configured
+from lib.storage.s3_compat import (
+    endpoint_url,
+    get_bucket,
+    get_client,
+    get_storage_config,
+    is_configured,
+)
 from lib.telemetry.schema import EVENT_COLUMNS, SCHEMA_VERSION, normalize_event
 
 
@@ -53,6 +59,26 @@ def _list_keys(prefix: str, max_files: int) -> list[str]:
     return keys
 
 
+def _get_read_client():
+    cfg = get_storage_config()
+    if not cfg.is_configured():
+        raise RuntimeError("Storage credentials are not configured.")
+    import boto3
+    import botocore.config
+
+    return boto3.client(
+        "s3",
+        region_name=cfg.region or None,
+        endpoint_url=endpoint_url(cfg) or None,
+        aws_access_key_id=cfg.access_key_id or None,
+        aws_secret_access_key=cfg.secret_access_key or None,
+        config=botocore.config.Config(
+            s3={"addressing_style": "path"},
+            response_checksum_validation="when_required",
+        ),
+    )
+
+
 def _delete_prefix(prefix: str) -> None:
     client = get_client()
     bucket = get_bucket()
@@ -71,7 +97,7 @@ def _delete_prefix(prefix: str) -> None:
 
 
 def _iter_event_records(keys: Iterable[str]) -> Iterator[dict]:
-    client = get_client()
+    client = _get_read_client()
     bucket = get_bucket()
     for key in keys:
         response = client.get_object(Bucket=bucket, Key=key)
