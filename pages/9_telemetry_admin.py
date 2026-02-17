@@ -2,7 +2,7 @@ import json
 import os
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, TYPE_CHECKING
 from uuid import uuid4
 
 import streamlit as st
@@ -24,6 +24,9 @@ from shared.errors_ui import render_error_banner
 from shared.settings import get_settings
 from shared.telemetry import page_guard
 from shared.telemetry.config import get_config
+
+if TYPE_CHECKING:
+    import pandas as pd
 
 
 def _is_mod_enabled() -> bool:
@@ -948,6 +951,47 @@ def _fetch_trace_events(
     return _execute_events_query(source, _build, use_storage, storage_config)
 
 
+def _fetch_submissions_for_session(
+    source: dict[str, Any],
+    session_id: str,
+    start_date: datetime.date,
+    end_date: datetime.date,
+    use_storage: bool,
+    storage_config,
+    limit: int = 25,
+) -> "pd.DataFrame":
+    def _build(src: dict[str, Any]):
+        relation = src.get("relation")
+        if not relation:
+            raise RuntimeError("No event relation")
+        union_sql, union_params = relation
+        columns = src["columns"]
+        ts_col = columns["ts"]
+        event_col = columns["event"]
+        page_col = columns["page"]
+        session_col = columns["session"]
+        payload_col = columns["payload"]
+        if src["source"] == "parquet":
+            form_expr = f"json_extract_string({payload_col}, '$.form_id')"
+        else:
+            form_expr = f"json_extract_string(to_json({payload_col}), '$.form_id')"
+        query = f"""
+            SELECT {ts_col} AS ts_utc,
+                   {page_col} AS page,
+                   {form_expr} AS form_id,
+                   {payload_col} AS payload
+            FROM ({union_sql})
+            WHERE {session_col} = ?
+              AND {event_col} = 'submission'
+              AND CAST({ts_col} AS DATE) BETWEEN ? AND ?
+            ORDER BY {ts_col} DESC
+            LIMIT ?
+        """
+        return query, (*union_params, session_id, str(start_date), str(end_date), int(limit))
+
+    return _execute_events_query(source, _build, use_storage, storage_config)
+
+
 with page_guard(os.path.basename(__file__)):
     page_header("Site Analytics", page_name=os.path.basename(__file__))
     settings = get_settings()
@@ -1114,8 +1158,18 @@ with page_guard(os.path.basename(__file__)):
 
     with tab_events:
         st.markdown("### Events Explorer")
-        if st.button("Run events query"):
-            st.session_state["events_run"] = True
+        run_col, submission_col = st.columns([1, 1])
+        with run_col:
+            if st.button("Run events query"):
+                st.session_state["events_run"] = True
+        with submission_col:
+            if st.button("Show submissions"):
+                st.session_state["events_run"] = True
+                st.session_state["events_submissions_only"] = True
+                st.session_state["events_event_name"] = "submission"
+                st.session_state["events_page_id"] = "All"
+                st.session_state["events_search_text"] = ""
+                st.session_state["events_offset"] = 0
         date_col, limit_col = st.columns([2, 1])
         with date_col:
             default_start, default_end = _default_range(7)
@@ -1166,12 +1220,24 @@ with page_guard(os.path.basename(__file__)):
                     source, start_date, end_date, use_storage, storage_config
                 )
             event_col, page_col, search_col = st.columns([1, 1, 2])
+            submissions_only = st.checkbox(
+                "Submissions only",
+                value=bool(st.session_state.get("events_submissions_only", False)),
+                key="events_submissions_only",
+            )
             with event_col:
+                event_options = ["All"] + event_names
+                if submissions_only and "submission" not in event_options:
+                    event_options = ["submission"] + event_options
+                event_index = 0
+                if submissions_only:
+                    event_index = event_options.index("submission")
                 selected_event = st.selectbox(
                     "Event name",
-                    options=["All"] + event_names,
-                    index=0,
+                    options=event_options,
+                    index=event_index,
                     key="events_event_name",
+                    disabled=submissions_only,
                 )
             with page_col:
                 selected_page = st.selectbox(
@@ -1196,7 +1262,10 @@ with page_guard(os.path.basename(__file__)):
                 st.session_state["events_offset"] = 0
 
             offset = int(st.session_state.get("events_offset", 0))
-            event_filter = None if selected_event == "All" else selected_event
+            if submissions_only:
+                event_filter = "submission"
+            else:
+                event_filter = None if selected_event == "All" else selected_event
             page_filter = None if selected_page == "All" else selected_page
             search_filter = search_text.strip() if search_text else None
 
@@ -1334,6 +1403,20 @@ with page_guard(os.path.basename(__file__)):
             except Exception:
                 trace_events = None
 
+            submissions_df = None
+            try:
+                submissions_df = _fetch_submissions_for_session(
+                    source,
+                    lookup_value,
+                    start_date,
+                    end_date,
+                    use_storage,
+                    storage_config,
+                )
+            except Exception as exc:
+                _handle_query_error(exc, "telemetry_admin_submissions")
+                submissions_df = None
+
             if (session_events is None or session_events.empty) and (
                 trace_events is None or trace_events.empty
             ):
@@ -1389,3 +1472,35 @@ with page_guard(os.path.basename(__file__)):
                             st.json(trace_events.iloc[0]["payload"])
                         except Exception:
                             st.code(str(trace_events.iloc[0]["payload"]))
+
+            st.markdown("**Submissions**")
+            if submissions_df is None or submissions_df.empty:
+                st.caption("No submissions recorded for this session.")
+            else:
+                st.dataframe(
+                    submissions_df[["ts_utc", "page", "form_id"]],
+                    use_container_width=True,
+                    hide_index=True,
+                    column_config={
+                        "ts_utc": st.column_config.DatetimeColumn(format="YYYY-MM-DD HH:mm:ss"),
+                    },
+                )
+                submission_options = [
+                    f"{row.ts_utc} | {row.page} | {row.form_id}"
+                    for row in submissions_df.itertuples()
+                ]
+                selected_submission = st.selectbox(
+                    "Submission details",
+                    submission_options,
+                    key="submission_detail_select",
+                )
+                selected_idx = submission_options.index(selected_submission)
+                submission_payload = submissions_df.iloc[selected_idx]["payload"]
+                with st.expander("Submission payload", expanded=False):
+                    try:
+                        if isinstance(submission_payload, str):
+                            st.json(json.loads(submission_payload))
+                        else:
+                            st.json(submission_payload)
+                    except Exception:
+                        st.code(str(submission_payload))

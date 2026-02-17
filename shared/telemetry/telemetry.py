@@ -5,11 +5,23 @@ import time
 import traceback
 from contextlib import contextmanager
 from typing import Any
+from uuid import uuid4
 
 import streamlit as st
 
 from lib.ops.memory import log_mem
-from .config import TelemetryConfig, get_config
+from lib.telemetry.privacy import (
+    dump_json_limited,
+    filter_allowlist,
+    redact_inputs,
+    truncate_structure,
+)
+from .config import (
+    TELEMETRY_SUBMISSION_ALLOWLIST,
+    TELEMETRY_SUBMISSIONS_ENABLED_PAGES,
+    TelemetryConfig,
+    get_config,
+)
 from shared.logging.ops import set_log_context
 from .session import (
     ensure_session_id,
@@ -140,6 +152,48 @@ def log_error(page: str, exc: BaseException) -> None:
         )
     except Exception as err:
         print(f"Telemetry log_error failed: {err}")
+
+
+def track_submission(
+    page_id: str,
+    form_id: str | None,
+    inputs: dict,
+    *,
+    tags: dict | None = None,
+) -> None:
+    config = get_config()
+    if not config.enabled:
+        return
+    if page_id not in TELEMETRY_SUBMISSIONS_ENABLED_PAGES:
+        return
+    try:
+        ensure_session_started()
+        session_id = ensure_session_id()
+        set_log_context(page=page_id, session_id=session_id)
+        allowlist = TELEMETRY_SUBMISSION_ALLOWLIST.get(page_id)
+        filtered = filter_allowlist(inputs or {}, allowlist)
+        redacted = redact_inputs(filtered)
+        truncated = truncate_structure(redacted)
+        envelope: dict[str, Any] = {
+            "form_id": form_id,
+            "inputs": truncated,
+        }
+        if tags:
+            envelope["tags"] = tags
+        payload_json = dump_json_limited(envelope)
+        trace_id = uuid4().hex[:10]
+        log_event(
+            "submission",
+            page_id,
+            payload={
+                "trace_id": trace_id,
+                "payload_json": payload_json,
+                "form_id": form_id,
+                "tags": tags or {},
+            },
+        )
+    except Exception as exc:
+        print(f"Telemetry track_submission failed: {exc}")
 
 
 @contextmanager

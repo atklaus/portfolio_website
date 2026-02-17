@@ -6,6 +6,7 @@ from .telemetry import (
     log_error,
     log_event,
     log_page_view,
+    track_submission,
     track_timing,
 )
 
@@ -18,5 +19,6 @@ __all__ = [
     "log_error",
     "log_event",
     "log_page_view",
+    "track_submission",
     "track_timing",
 ]

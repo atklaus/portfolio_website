@@ -59,3 +59,18 @@ def warn_if_unconfigured() -> None:
     ):
         print("Warning: LOG_SINK requests object storage but R2/Spaces is not configured.")
         _WARNED_UNCONFIGURED = True
+
+
+TELEMETRY_SUBMISSIONS_ENABLED_PAGES = {"wnba_success"}
+
+TELEMETRY_SUBMISSION_ALLOWLIST = {
+    "wnba_success": [
+        "season",
+        "college",
+        "player",
+        "offline_mode",
+        "data_source",
+        "model_version",
+        "dataset_version",
+    ]
+}

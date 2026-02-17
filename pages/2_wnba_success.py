@@ -17,7 +17,7 @@ import re
 import datetime
 import html as html_lib
 import numpy as np
-from shared.telemetry import page_guard
+from shared.telemetry import page_guard, track_submission
 
 
 with page_guard(os.path.basename(__file__)):
@@ -946,6 +946,22 @@ with page_guard(os.path.basename(__file__)):
         st.session_state["validation_meta"] = None
 
     if search:
+        inputs = {
+            "season": search_dict.get("season"),
+            "college": search_dict.get("college"),
+            "player": search_dict.get("player"),
+            "offline_mode": _is_offline_mode(),
+            "data_source": "offline" if _is_offline_mode() else "live",
+        }
+        try:
+            track_submission(
+                page_id="wnba_success",
+                form_id="predict",
+                inputs=inputs,
+                tags={"feature": "predict"},
+            )
+        except Exception:
+            pass
         with st.spinner("Running model..."):
             log_mem("wnba_predict:before_data")
             base_df = get_player_df(search_dict)
