@@ -178,6 +178,9 @@ Thumbs.db
 *.exe
 *.war
 
+# Analytics build artifacts
+analytics/artifacts/
+
 # Large media files
 *.mp4
 *.tiff

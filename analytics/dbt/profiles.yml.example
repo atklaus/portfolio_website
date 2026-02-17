@@ -1,0 +1,7 @@
+portfolio_analytics:
+  target: local
+  outputs:
+    local:
+      type: duckdb
+      path: ../artifacts/warehouse.duckdb
+      threads: 4

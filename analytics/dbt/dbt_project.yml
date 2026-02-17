@@ -1,0 +1,23 @@
+name: "portfolio_analytics"
+version: "1.0.0"
+config-version: 2
+
+profile: "portfolio_analytics"
+
+model-paths: ["models"]
+analysis-paths: ["analysis"]
+test-paths: ["tests"]
+seed-paths: ["seeds"]
+macro-paths: ["macros"]
+
+target-path: "../artifacts/dbt"
+clean-targets:
+  - "../artifacts/dbt"
+  - "dbt_packages"
+
+models:
+  portfolio_analytics:
+    staging:
+      +materialized: view
+    marts:
+      +materialized: table

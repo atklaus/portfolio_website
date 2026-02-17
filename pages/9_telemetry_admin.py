@@ -5,6 +5,7 @@ from pathlib import Path
 import streamlit as st
 
 from app.layout.header import page_header
+from lib.analytics.marts import load_latest_manifest, read_latest_parquet_df
 from lib.ops.memory import log_mem
 from lib.storage import paths as storage_paths
 from lib.storage.s3_compat import (
@@ -160,3 +161,38 @@ with page_guard(os.path.basename(__file__)):
         st.dataframe(df_recent, use_container_width=True, hide_index=True)
     except Exception:
         st.caption("No events yet.")
+
+    st.markdown("---")
+    st.markdown("### Latest analytics mart")
+    if not use_storage:
+        st.caption("R2 storage is not configured; analytics marts are unavailable.")
+    else:
+        project_name = "databuilds"
+        try:
+            manifest = load_latest_manifest(project_name)
+        except Exception as exc:
+            st.caption(f"No analytics manifest found: {exc}")
+        else:
+            model_names = [entry.get("name") for entry in manifest.get("models", []) if entry.get("name")]
+            if not model_names:
+                st.caption("Analytics manifest is empty.")
+            else:
+                selected_model = st.selectbox("Mart model", model_names, key="analytics_mart_model")
+                mart_limit = st.number_input(
+                    "Row limit",
+                    min_value=10,
+                    max_value=1000,
+                    value=200,
+                    step=50,
+                    key="analytics_mart_limit",
+                )
+                try:
+                    df_mart = read_latest_parquet_df(
+                        project_name,
+                        selected_model,
+                        limit=int(mart_limit),
+                        manifest=manifest,
+                    )
+                    st.dataframe(df_mart, use_container_width=True, hide_index=True)
+                except Exception as exc:
+                    st.error(f"Unable to load analytics mart '{selected_model}': {exc}")

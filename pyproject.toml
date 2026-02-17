@@ -32,6 +32,13 @@ lxml = "^4.9.4"
 duckdb = "^0.10.2"
 pytest = "^9.0.2"
 
+[tool.poetry.group.analytics]
+optional = true
+
+[tool.poetry.group.analytics.dependencies]
+dbt-duckdb = "^1.8.0"
+pyarrow = "^15.0.0"
+
 [build-system]
 requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"
