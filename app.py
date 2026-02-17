@@ -5,6 +5,7 @@ from lib.analytics import inject_ga4
 from lib.errors.boundary import get_app_env, run_with_error_boundary
 from lib.ops.memory import log_mem
 from app.shared_ui.theme import inject_base_css
+from shared.layout.transition import render_transition_shell
 from shared.pages import get_pages
 from shared.seo import ensure_sitemap
 from shared.logging.ops import configure_logging
@@ -67,7 +68,13 @@ def _render_app() -> None:
         if page.include_in_nav
     ]
     nav = st.navigation(pages, position="hidden")
-    nav.run()
+    page_title = getattr(nav, "title", None) or getattr(nav, "name", None) or settings.app_name
+    content_container, done = render_transition_shell(str(page_title))
+    try:
+        with content_container:
+            nav.run()
+    finally:
+        done()
 
 
 run_with_error_boundary(_render_app, page_id="navigation", context={})

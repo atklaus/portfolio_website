@@ -211,7 +211,7 @@ def page_header(title, page_name, container_style=True):
     if container_style:
         set_page_container_style(
             max_width_100_percent=True,
-            padding_top=0.0,
+            padding_top=0.25,
             padding_bottom=0.25,
             padding_left=1.25,
             padding_right=1.25,
