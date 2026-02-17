@@ -48,5 +48,9 @@ COPY --chown=appuser . .
 # Expose streamlit port
 EXPOSE 8501
 
+# Default Streamlit bind settings (override via env or fly.toml)
+ENV STREAMLIT_SERVER_ADDRESS=0.0.0.0
+ENV STREAMLIT_SERVER_PORT=8501
+
 # Run the application
-ENTRYPOINT ["streamlit", "run", "app.py", "--server.address=0.0.0.0", "--server.port=8501"]
+CMD ["streamlit", "run", "app.py"]
