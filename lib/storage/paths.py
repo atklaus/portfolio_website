@@ -84,6 +84,18 @@ def telemetry_sessions_glob() -> str:
     return "telemetry/sessions/date=*/sessions_*.parquet"
 
 
+def telemetry_events_parquet_prefix(date_str: str) -> str:
+    return f"telemetry/events_parquet/date={date_str}"
+
+
+def telemetry_events_parquet_key(date_str: str, part: str) -> str:
+    return _join(telemetry_events_parquet_prefix(date_str), f"part-{part}.parquet")
+
+
+def telemetry_events_parquet_manifest_key(date_str: str) -> str:
+    return _join(telemetry_events_parquet_prefix(date_str), "_manifest.json")
+
+
 def ops_logs_key(instance: str, ts: datetime | None = None, rand: str | None = None) -> str:
     date_part = _date_str(ts)
     time_part = _time_str(ts)

@@ -25,6 +25,7 @@ Production site: https://databuilds.dev
                  ┌─────────────────────────┐
                  │ Cloudflare R2           │
                  │ - telemetry events      │
+                 │ - events parquet layer  │
                  │ - session rollups       │
                  │ - feature tables        │
                  │ - serving marts         │
@@ -73,6 +74,21 @@ Batch layer:
 - Triggered via GitHub Actions
 
 This separation is intentional to keep the production container lean and predictable.
+
+## Telemetry Storage
+
+Raw telemetry events are written as JSONL.gz for fast, low-latency writes:
+
+- `telemetry/events/date=YYYY-MM-DD/events_*.jsonl.gz`
+
+Nightly, a GitHub Actions pipeline converts raw events into partitioned Parquet for fast reads:
+
+- `telemetry/events_parquet/date=YYYY-MM-DD/part-0000.parquet`
+- `telemetry/events_parquet/date=YYYY-MM-DD/_manifest.json`
+
+The admin analytics page queries Parquet by default and falls back to JSONL.gz if a date
+has not been rolled up yet. To keep latency and listing costs low, limit JSONL queries to
+the last 7 days and retain only the required raw history.
 
 ## Local Development
 

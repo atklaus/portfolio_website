@@ -174,7 +174,7 @@ def duckdb_httpfs_config(config: StorageConfig | None = None) -> dict[str, Any]:
     endpoint_host = _normalize_endpoint_host(raw_endpoint)
     use_ssl = True
     if raw_endpoint:
-        use_ssl = not raw_endpoint.startswith("http://")
+        use_ssl = raw_endpoint.startswith("https://") or not raw_endpoint.startswith("http://")
     return {
         "s3_region": cfg.region,
         "s3_endpoint": endpoint_host,
