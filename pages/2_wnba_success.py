@@ -16,6 +16,7 @@ import requests
 import re
 import datetime
 import html as html_lib
+import numpy as np
 from shared.telemetry import page_guard
 
 
@@ -40,22 +41,41 @@ with page_guard(os.path.basename(__file__)):
 
     BASE_URL = 'https://www.sports-reference.com'
     SEASON_URL_TEMPLATE = 'https://www.sports-reference.com/cbb/seasons/women/{}-school-stats.html'
-    MODEL_FEATURES_FALLBACK = [
-        "pg_2p_pct",
-        "adv_stl_pct",
-        "pg_fg_pct",
-        "pg_pts",
-        "pg_sos",
-        "adv_trb_pct",
-        "adv_ast_pct",
-        "pg_tov",
+    SELECTED_FEATURES = [
+        "pg_fg%",
+        "pg_2p%",
+        "adv_efg%",
+        "adv_ftr",
+        "adv_drb%",
+        "adv_obpm",
+        "adv_bpm",
+        "tot_fg%",
+        "tot_2p%",
+        "tot_blk",
     ]
-    FEATURE_NAME_MAP = {
-        "pg_2p%": "pg_2p_pct",
-        "adv_stl%": "adv_stl_pct",
-        "pg_fg%": "pg_fg_pct",
-        "adv_trb%": "adv_trb_pct",
-        "adv_ast%": "adv_ast_pct",
+    MODEL_FEATURES_FALLBACK = []
+    FEATURE_NAME_MAP = {}
+    COLLEGE_TEAM_ALIASES = {
+        "baylor": "college_team_Baylor",
+        "duke": "college_team_Duke",
+        "maryland": "college_team_Maryland",
+        "middletennessee": "college_team_Middle Tennessee",
+        "middletennesseestate": "college_team_Middle Tennessee",
+        "southcarolina": "college_team_South Carolina",
+        "tennessee": "college_team_Tennessee",
+        "uconn": "college_team_UConn",
+        "connecticut": "college_team_UConn",
+    }
+    CONFERENCE_ALIASES = {
+        "aac": "conference_AAC",
+        "acc": "conference_ACC",
+        "big12": "conference_Big 12",
+        "bigeast": "conference_Big East",
+        "bigten": "conference_Big Ten",
+        "maac": "conference_MAAC",
+        "pac10": "conference_Pac-10",
+        "pac12": "conference_Pac-12",
+        "sec": "conference_SEC",
     }
     DEFAULT_HEADERS = {
         "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
@@ -118,10 +138,28 @@ with page_guard(os.path.basename(__file__)):
         return [season] if season else []
 
 
+    def _patch_model_compat(model):
+        try:
+            from sklearn.compose import ColumnTransformer
+        except Exception:
+            return
+        targets = []
+        if isinstance(model, ColumnTransformer):
+            targets.append(model)
+        if hasattr(model, "named_steps"):
+            for step in model.named_steps.values():
+                if isinstance(step, ColumnTransformer):
+                    targets.append(step)
+        for transformer in targets:
+            if not hasattr(transformer, "_name_to_fitted_passthrough"):
+                transformer._name_to_fitted_passthrough = {}
+
+    @st.cache_resource(show_spinner='Loading model...',ttl=43200)
     def init_model():
         log_mem("wnba_model_load:before")
         import joblib
         loaded_model = joblib.load(MODEL_PATH)
+        _patch_model_compat(loaded_model)
         log_mem("wnba_model_load:after")
 
         # with open(MODEL_PATH, 'rb') as model_file:
@@ -145,6 +183,25 @@ with page_guard(os.path.basename(__file__)):
         return None
 
     def get_model_feature_names(model):
+        if hasattr(model, "named_steps") and "preprocess" in model.named_steps:
+            preprocess = model.named_steps["preprocess"]
+            transformers = getattr(preprocess, "transformers_", None)
+            if transformers:
+                cols = []
+                for name, _, col in transformers:
+                    if name == "remainder":
+                        continue
+                    if isinstance(col, (list, tuple)):
+                        cols.extend(list(col))
+                    else:
+                        try:
+                            cols.extend(list(col))
+                        except TypeError:
+                            pass
+                if cols:
+                    return cols
+            if hasattr(preprocess, "feature_names_in_"):
+                return list(preprocess.feature_names_in_)
         schema = _load_feature_schema()
         if schema:
             return schema
@@ -155,6 +212,24 @@ with page_guard(os.path.basename(__file__)):
             if hasattr(step, "feature_names_in_"):
                 return list(step.feature_names_in_)
         return list(MODEL_FEATURES_FALLBACK)
+
+    def _strip_feature_prefix(name: str) -> str:
+        if "__" in name:
+            return name.split("__", 1)[1]
+        return name
+
+    def _feature_names_prefixed(feature_cols: list[str]) -> bool:
+        return bool(feature_cols) and all("__" in col for col in feature_cols)
+
+    def _normalize_text(value: str) -> str:
+        if not value:
+            return ""
+        cleaned = re.sub(r"[^a-z0-9]+", "", str(value).lower())
+        return cleaned
+
+    def _set_one_hot(model_input, col_name):
+        if col_name and col_name in model_input.columns:
+            model_input[col_name] = 1
 
     def _normalize_team_name(name):
         if name is None:
@@ -448,21 +523,72 @@ with page_guard(os.path.basename(__file__)):
             return None
         return float(value)
 
-    def build_model_input(base_df, model):
+    def build_model_input(base_df, model, search_dict):
         if base_df is None or base_df.empty:
-            return None
+            return None, None, None, None
         feature_cols = get_model_feature_names(model)
-        features = base_df.rename(columns=FEATURE_NAME_MAP)
-        missing_cols = [col for col in feature_cols if col not in features.columns]
-        if missing_cols:
+        raw_feature_cols = [_strip_feature_prefix(col) for col in feature_cols]
+        features = base_df.rename(columns=FEATURE_NAME_MAP).copy()
+        if "adv_per_college" not in features.columns and "adv_per" in features.columns:
+            features["adv_per_college"] = features["adv_per"]
+        if "adv_efg%" not in features.columns:
+            if all(col in features.columns for col in ("pg_fg", "pg_3p", "pg_fga")):
+                denom = pd.to_numeric(features["pg_fga"], errors="coerce")
+                numer = (
+                    pd.to_numeric(features["pg_fg"], errors="coerce")
+                    + 0.5 * pd.to_numeric(features["pg_3p"], errors="coerce")
+                )
+                features["adv_efg%"] = numer / denom.replace(0, np.nan)
+            elif all(col in features.columns for col in ("tot_fg", "tot_3p", "tot_fga")):
+                denom = pd.to_numeric(features["tot_fga"], errors="coerce")
+                numer = (
+                    pd.to_numeric(features["tot_fg"], errors="coerce")
+                    + 0.5 * pd.to_numeric(features["tot_3p"], errors="coerce")
+                )
+                features["adv_efg%"] = numer / denom.replace(0, np.nan)
+
+        model_input = pd.DataFrame(index=features.index)
+        for col in raw_feature_cols:
+            if col in features.columns:
+                model_input[col] = features[col]
+            else:
+                model_input[col] = np.nan
+
+        college_value = search_dict.get("college") if search_dict else None
+        if college_value:
+            normalized_college = _normalize_text(college_value)
+            college_col = COLLEGE_TEAM_ALIASES.get(normalized_college)
+            if college_col and college_col in model_input.columns:
+                model_input[college_col] = 1
+
+        conf_value = None
+        for col in ("pg_conf", "adv_conf", "tot_conf"):
+            if col in features.columns and features[col].notna().any():
+                conf_value = str(features[col].iloc[0])
+                break
+        if conf_value:
+            normalized_conf = _normalize_text(conf_value)
+            conf_col = CONFERENCE_ALIASES.get(normalized_conf)
+            if conf_col and conf_col in model_input.columns:
+                model_input[conf_col] = 1
+
+        for col in model_input.columns:
+            if col.startswith("college_team_") or col.startswith("conference_"):
+                model_input[col] = model_input[col].fillna(0)
+        model_input = model_input.apply(pd.to_numeric, errors="coerce")
+
+        display_missing = [col for col in SELECTED_FEATURES if col not in model_input.columns]
+        if display_missing:
             st.error(
                 "Missing required stats for prediction: "
-                + ", ".join(missing_cols)
+                + ", ".join(display_missing)
                 + ". The Sports-Reference page may not include these columns."
             )
-            st.write("Available columns:", sorted(features.columns))
-            return None
-        return features[feature_cols].copy()
+            return None, None, None, None
+
+        display_cols = [col for col in SELECTED_FEATURES if col in model_input.columns]
+        display_df = model_input[display_cols].copy()
+        return model_input, display_df, display_cols, raw_feature_cols
 
 
     # Load the model from the file
@@ -664,6 +790,10 @@ with page_guard(os.path.basename(__file__)):
     # Add this function to display the detailed context of your paper
     def display_paper_context():
         with st.expander("Learn more about the predictive model and it's background"):
+            st.info(
+                "Note: The predictive model has been updated since the paper was published. "
+                "Results shown here reflect the newer model and may differ from the paper."
+            )
 
             # pdf_path = "static/files/Predicting_WNBA_Success.pdf"
             # pdf_base64 = utils.get_pdf_base64(pdf_path)
@@ -815,30 +945,6 @@ with page_guard(os.path.basename(__file__)):
     if "validation_meta" not in st.session_state:
         st.session_state["validation_meta"] = None
 
-    show_validation = st.checkbox(
-        "Show model input validation",
-        value=False,
-        key="show_model_input_validation",
-    )
-    if show_validation:
-        validation_df = st.session_state.get("validation_df")
-        validation_meta = st.session_state.get("validation_meta") or {}
-        if validation_df is None:
-            st.caption("Run a prediction first to see validation details.")
-        else:
-            st.dataframe(validation_df, hide_index=True)
-            model_features = validation_meta.get("model_features")
-            used_features = validation_meta.get("used_features")
-            if model_features is not None and used_features is not None:
-                st.caption(
-                    f"Model expects {model_features} features. "
-                    f"Using {used_features} features."
-                )
-            st.caption(
-                "Note: pg_*_pct columns are decimals (e.g., 0.55 = 55%), while "
-                "adv_stl_pct/adv_trb_pct/adv_ast_pct are percent points (e.g., 2.3 = 2.3%)."
-            )
-
     if search:
         with st.spinner("Running model..."):
             log_mem("wnba_predict:before_data")
@@ -847,58 +953,60 @@ with page_guard(os.path.basename(__file__)):
             if base_df is None or base_df.empty:
                 st.stop()
 
-            if "pg_sos" not in base_df.columns or base_df["pg_sos"].isna().all():
-                sos_value = get_team_sos_safe(
-                    search_dict["season"],
-                    search_dict["college"],
-                    search_dict.get("team_url"),
-                )
-                if sos_value is not None:
-                    base_df["pg_sos"] = sos_value
-                elif "pg_sos" not in base_df.columns:
-                    base_df["pg_sos"] = pd.NA
-
             log_mem("wnba_predict:before_model")
             model = init_model()
             log_mem("wnba_predict:after_model")
-            model_input = build_model_input(base_df, model)
+            model_input, display_df, display_cols, model_cols = build_model_input(
+                base_df, model, search_dict
+            )
             if model_input is None:
                 st.stop()
 
             st.markdown("Features used in Prediction")
             st.dataframe(
-                model_input,
+                display_df,
                 column_config={
-                    "pg_2p_pct": st.column_config.NumberColumn(
-                        label="2-Point Field Goal Percentage", format="%.2f %%"
-                    ),
-                    "adv_stl_pct": st.column_config.NumberColumn(
-                        label="Steal Percentage", format="%.2f %%"
-                    ),
-                    "pg_fg_pct": st.column_config.NumberColumn(
+                    "pg_fg%": st.column_config.NumberColumn(
                         label="Field Goal Percentage", format="%.2f %%"
                     ),
-                    "pg_pts": st.column_config.NumberColumn(label="Points Per Game"),
-                    "pg_sos": st.column_config.NumberColumn(label="Strength of Schedule"),
-                    "adv_trb_pct": st.column_config.NumberColumn(
-                        label="Total Rebound Percentage", format="%.2f %%"
+                    "pg_2p%": st.column_config.NumberColumn(
+                        label="2-Point Field Goal Percentage", format="%.2f %%"
                     ),
-                    "adv_ast_pct": st.column_config.NumberColumn(
-                        label="Assist Percentage", format="%.2f %%"
+                    "adv_efg%": st.column_config.NumberColumn(
+                        label="Effective FG Percentage", format="%.2f %%"
                     ),
-                    "pg_tov": st.column_config.NumberColumn(label="Turnovers Per Game"),
+                    "adv_ftr": st.column_config.NumberColumn(
+                        label="Free Throw Rate", format="%.2f"
+                    ),
+                    "adv_drb%": st.column_config.NumberColumn(
+                        label="Defensive Rebound Percentage", format="%.2f %%"
+                    ),
+                    "adv_obpm": st.column_config.NumberColumn(
+                        label="Offensive BPM", format="%.2f"
+                    ),
+                    "adv_bpm": st.column_config.NumberColumn(
+                        label="Box Plus/Minus", format="%.2f"
+                    ),
+                    "tot_fg%": st.column_config.NumberColumn(
+                        label="Total FG Percentage", format="%.2f %%"
+                    ),
+                    "tot_2p%": st.column_config.NumberColumn(
+                        label="Total 2P Percentage", format="%.2f %%"
+                    ),
+                    "tot_blk": st.column_config.NumberColumn(
+                        label="Total Blocks", format="%.0f"
+                    ),
                 },
                 hide_index=True,
             )
 
-            feature_cols = list(model_input.columns)
             validation_df = pd.DataFrame(
-                {"feature": feature_cols, "raw_value": model_input.iloc[0].values}
+                {"feature": display_cols, "raw_value": display_df.iloc[0].values}
             )
             st.session_state["validation_df"] = validation_df
             st.session_state["validation_meta"] = {
-                "model_features": len(get_model_feature_names(model)),
-                "used_features": len(feature_cols),
+                "model_features": len(model_cols),
+                "used_features": len(display_cols),
             }
 
             predicted_values = model.predict(model_input)
