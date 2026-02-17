@@ -18,6 +18,7 @@ with page_guard(os.path.basename(__file__)):
     ROOT_DIR = Path(__file__).resolve().parents[1]
     MODEL_DIR = ROOT_DIR / "projects" / "landscape_img" / "model"
 
+    @st.cache_resource(show_spinner="Loading model...", ttl=43200)
     def init_model():
         log_mem("landscape_model_load:before")
         from tensorflow import keras
@@ -110,22 +111,25 @@ with page_guard(os.path.basename(__file__)):
         model = init_model()
         log_mem("landscape_predict:after_model")
 
-        with st.spinner('Making prediction...'):
+        with st.spinner("Decoding image..."):
             bytes_data = uploaded_file.getvalue()
             import cv2
             img = cv2.imdecode(np.frombuffer(bytes_data, np.uint8), cv2.IMREAD_UNCHANGED)
 
+        with st.spinner("Preparing tiles..."):
             tiles = image_to_tiles(img, overlap=10)
-
             # Preprocess tiles in parallel
             preprocessed_tiles = parallel_preprocess_tiles(tiles)
+            if not preprocessed_tiles:
+                st.warning("Could not generate image tiles. Try a larger or clearer image.")
+                st.stop()
 
-            # Sequentially predict for each preprocessed tile
-            tile_predictions = [model.predict(tile) for tile in preprocessed_tiles]
-
-            # Combine predictions
+        with st.spinner("Running model..."):
+            # Batch predictions instead of per-tile calls
+            batch = np.concatenate(preprocessed_tiles, axis=0)
+            tile_predictions = model.predict(batch, verbose=0)
             combined_prediction = combine_predictions(tile_predictions)
-            pred = class_names[np.argmax(combined_prediction)]
+            pred = class_names[int(np.argmax(combined_prediction))]
         st.info('Answer: **' + pred.upper() + '**')
         st.image(img, channels="BGR")
 

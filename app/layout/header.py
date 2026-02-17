@@ -4,7 +4,6 @@ from pathlib import Path
 import streamlit as st
 
 from .. import config as c
-from app.shared_ui import theme
 from lib.ops.memory import log_mem
 from shared.seo import apply_page_meta
 from shared.settings import email_href, get_settings
@@ -80,6 +79,7 @@ def _standardize_name(name: str) -> str:
     return name.strip().lower().replace("_", " ")
 
 
+@st.cache_data(show_spinner=False, max_entries=2)
 def _page_index():
     repo_root = Path(__file__).resolve().parents[2]
     pages_dir = repo_root / "pages"
@@ -199,7 +199,6 @@ def render_sidebar_nav(page_name: str):
         st.markdown(sidebar_html, unsafe_allow_html=True)
 
 def page_header(title, page_name, container_style=True):
-    theme.inject_base_styles()
     try:
         apply_page_meta(str(page_name))
     except Exception:

@@ -4,6 +4,7 @@ import streamlit.components.v1 as components
 from lib.analytics import inject_ga4
 from lib.errors.boundary import get_app_env, run_with_error_boundary
 from lib.ops.memory import log_mem
+from app.shared_ui.theme import inject_base_css
 from shared.pages import get_pages
 from shared.seo import ensure_sitemap
 from shared.logging.ops import configure_logging
@@ -26,6 +27,8 @@ if get_app_env() == "prod":
         st.set_option("client.showErrorDetails", False)
     except Exception:
         pass
+
+inject_base_css()
 
 
 def _maybe_redirect_static() -> None:
