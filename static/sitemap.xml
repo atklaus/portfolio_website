@@ -1,11 +1,11 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
-  <url><loc>https://databuilds.dev/?page=0%20Home</loc></url>
-  <url><loc>https://databuilds.dev/?page=1%20Landscape%20Img</loc></url>
-  <url><loc>https://databuilds.dev/?page=2%20Wnba%20Success</loc></url>
-  <url><loc>https://databuilds.dev/?page=4%20Game%20Of%20Life</loc></url>
-  <url><loc>https://databuilds.dev/?page=5%20Ellipses</loc></url>
-  <url><loc>https://databuilds.dev/?page=6%20Happy%20Prime</loc></url>
-  <url><loc>https://databuilds.dev/?page=8%20Bibliometrix%20Reference%20Cleaner</loc></url>
-  <url><loc>https://databuilds.dev/?page=9%20Telemetry%20Admin</loc></url>
+  <url><loc>https://databuilds.dev/0_home</loc></url>
+  <url><loc>https://databuilds.dev/1_landscape_img</loc></url>
+  <url><loc>https://databuilds.dev/2_wnba_success</loc></url>
+  <url><loc>https://databuilds.dev/4_game_of_life</loc></url>
+  <url><loc>https://databuilds.dev/5_ellipses</loc></url>
+  <url><loc>https://databuilds.dev/6_happy_prime</loc></url>
+  <url><loc>https://databuilds.dev/8_bibliometrix_reference_cleaner</loc></url>
+  <url><loc>https://databuilds.dev/9_telemetry_admin</loc></url>
 </urlset>

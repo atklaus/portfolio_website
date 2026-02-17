@@ -53,7 +53,13 @@ def _render_app() -> None:
         st.empty()
 
     pages = [
-        st.Page(page.file, title=page.title, icon=page.icon, default=page.key == "home")
+        st.Page(
+            page.file,
+            title=page.title,
+            icon=page.icon,
+            url_path=page.url_path,
+            default=page.key == "home",
+        )
         for page in get_pages()
         if page.include_in_nav
     ]

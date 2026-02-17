@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Iterable
-from urllib.parse import quote, unquote
 from pathlib import Path
 
 import streamlit as st
@@ -179,40 +177,11 @@ def _icon_html(icon: str) -> str:
     return icon
 
 
-def _get_query_param(name: str) -> str | None:
-    try:
-        value = st.query_params.get(name)
-    except AttributeError:
-        value = st.experimental_get_query_params().get(name)
-    if isinstance(value, list):
-        return value[0]
-    return value
-
-
-def _clear_query_params() -> None:
-    try:
-        st.query_params.clear()
-    except AttributeError:
-        st.experimental_set_query_params()
-
-
-def _handle_internal_navigation(cards: Iterable[ProjectCard]) -> None:
-    go_to = _get_query_param("go")
-    if not go_to:
-        return
-    destination = unquote(go_to)
-    internal_targets = {card.destination for card in cards if not _is_external(card.destination)}
-    if destination in internal_targets:
-        _clear_query_params()
-        st.switch_page(destination)
-
-
 def render_project_cards(cards: list[ProjectCard]) -> None:
     if not cards:
         return
 
     st.markdown(_CARD_CSS, unsafe_allow_html=True)
-    _handle_internal_navigation(cards)
 
     html = ['<div class="ads-card-grid">']
     for card in cards:
@@ -221,7 +190,7 @@ def render_project_cards(cards: list[ProjectCard]) -> None:
             href = card.destination
             target = ' target="_blank" rel="noopener"'
         else:
-            href = f"?go={quote(card.destination)}"
+            href = card.destination
             target = ' target="_self"'
 
         icon_html = _icon_html(card.icon)

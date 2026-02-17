@@ -93,8 +93,19 @@ def _page_index():
 
 
 def get_page_path(name: str) -> str:
-    index = _page_index()
-    return index.get(_standardize_name(name), index["home"])
+    from shared.pages import get_pages
+
+    target = _standardize_name(name)
+    for page in get_pages():
+        slug = _standardize_name(page.key)
+        stem = Path(page.file).stem
+        parts = stem.split("_", 1)
+        file_slug = _standardize_name(parts[1] if len(parts) > 1 and parts[0].isdigit() else stem)
+        if slug == target or file_slug == target:
+            if page.key == "home":
+                return "/"
+            return f"/{page.url_path}"
+    return "/"
 
 
 def render_sidebar_nav(page_name: str):

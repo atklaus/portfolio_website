@@ -12,6 +12,7 @@ from app import config as app_config
 class PageDef:
     key: str
     file: str
+    url_path: str
     title: str
     icon: str
     description: str
@@ -87,6 +88,7 @@ def _parse_page(path: Path, mods: dict[str, dict]) -> tuple[int, str, PageDef]:
     page = PageDef(
         key=str(key),
         file=str(Path("pages") / path.name),
+        url_path=str(override.get("url_path", key)),
         title=str(override.get("title", title)),
         icon=str(override.get("icon", icon)),
         description=str(override.get("description", description)),
@@ -119,4 +121,4 @@ def page_url(page: PageDef, base_url: str) -> str:
     base = base_url.rstrip("/")
     if page.key == "home":
         return f"{base}/"
-    return f"{base}/?page={quote(page.title)}"
+    return f"{base}/{quote(page.url_path)}"

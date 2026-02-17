@@ -259,4 +259,7 @@ div[data-testid="stMainBlockContainer"] div[data-testid="stElementContainer"]:fi
 
 
 def inject_base_styles() -> None:
+    if st.session_state.get("_base_css_injected"):
+        return
     st.markdown(_BASE_CSS, unsafe_allow_html=True)
+    st.session_state["_base_css_injected"] = True
