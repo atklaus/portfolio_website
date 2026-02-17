@@ -15,7 +15,7 @@ FROM base AS builder
 
 # System deps for building wheels (only in build stage)
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends gcc libgl1 && \
+    apt-get install -y --no-install-recommends gcc libgl1 libglib2.0-0 && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
@@ -30,7 +30,7 @@ FROM base AS runtime
 
 # Runtime libs only
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends libgl1 && \
+    apt-get install -y --no-install-recommends libgl1 libglib2.0-0 && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
