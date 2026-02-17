@@ -20,6 +20,28 @@ html, body, [class*="css"] {
 html {
   scroll-behavior: smooth;
 }
+/* Kill the top gap inside the main page content */
+div[data-testid="stMainBlockContainer"] {
+  padding-top: 0 !important;
+}
+div[data-testid="stMainBlockContainer"] > div:first-child {
+  margin-top: 0 !important;
+  padding-top: 0 !important;
+}
+/* Streamlit often wraps content in a first vertical block */
+div[data-testid="stMainBlockContainer"] .stVerticalBlock:first-child {
+  margin-top: 0 !important;
+  padding-top: 0 !important;
+}
+/* Also ensure the first element container doesn't add spacing */
+div[data-testid="stMainBlockContainer"] div[data-testid="stElementContainer"]:first-child {
+  margin-top: 0 !important;
+  padding-top: 0 !important;
+}
+/* Controlled breathing room */
+.main .block-container {
+  padding-top: 1.25rem !important;
+}
 .content-shell,
 .ads-shell {
   max-width: 1240px;
