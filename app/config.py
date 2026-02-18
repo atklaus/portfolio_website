@@ -16,6 +16,14 @@ MOD_ACCESS = {
     ,'description':''
     }
 
+    ,'data_platform': {
+    'button': '🧬 Data Platform'
+    ,'name' : 'data_platform'
+    ,'description': 'Lineage + docs for everything powering this site'
+    ,'group': 'featured'
+    ,'tags': ('Platform','Infrastructure','Data Engineering')
+    }
+
     ,'wnba_success': {
     'button' : '🏀 Predicting WNBA Success'
     ,'name' : 'wnba_success'
@@ -64,14 +72,6 @@ MOD_ACCESS = {
     ,'description':'Canonicalize Scopus/WoS references for bibliometrix/Biblioshiny.'
     ,'group': 'featured'
     ,'tags': ('Data Engineering', 'ETL', 'Fuzzy Matching', 'Record Linkage')
-    }
-
-    ,'data_platform': {
-    'button': '🧬 Data Platform'
-    ,'name' : 'data_platform'
-    ,'description': 'Lineage + docs for everything powering this site'
-    ,'group': 'featured'
-    ,'tags': ('Platform','Infrastructure','Data Engineering')
     }
 
     ,'telemetry_admin': {
