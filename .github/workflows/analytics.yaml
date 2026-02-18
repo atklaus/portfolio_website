@@ -32,9 +32,6 @@ jobs:
         run: |
           cd analytics/dbt
           if [ -f packages.yml ]; then poetry run dbt deps --profiles-dir .; fi
+          poetry run dbt run-operation attach_r2_iceberg_if_needed --profiles-dir . --target iceberg
+          poetry run dbt run-operation debug_duckdb_databases --profiles-dir . --target iceberg
           poetry run dbt build --profiles-dir . --target iceberg
-      - name: Log attached catalogs (non-blocking)
-        continue-on-error: true
-        run: |
-          cd analytics/dbt
-          poetry run dbt run-operation debug_attached_catalogs --profiles-dir . --target iceberg

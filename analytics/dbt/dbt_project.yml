@@ -23,4 +23,5 @@ models:
       +materialized: table
 
 on-run-start:
+  - "{{ log('on-run-start fired, target=' ~ target.name, info=True) }}"
   - "{{ attach_r2_iceberg_if_needed() }}"
