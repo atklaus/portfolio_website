@@ -1,4 +1,4 @@
-name: elementary-report
+name: dbt_elementary
 
 on:
   push:
@@ -37,13 +37,12 @@ jobs:
           dbt docs generate --profiles-dir . --target-path ../artifacts/dbt
       - name: Verify dbt artifacts
         run: |
-          if [ -f "analytics/artifacts/dbt/manifest.json" ]; then
-            echo "DBT_ARTIFACTS_READY=true" >> "$GITHUB_ENV"
-          else
-            echo "DBT_ARTIFACTS_READY=false" >> "$GITHUB_ENV"
-            echo "Missing analytics/artifacts/dbt/manifest.json"
-            exit 1
-          fi
+          set -euo pipefail
+          SRC="analytics/artifacts/dbt"
+          test -f "${SRC}/index.html"
+          test -f "${SRC}/manifest.json"
+          test -f "${SRC}/catalog.json"
+          echo "DBT_ARTIFACTS_READY=true" >> "$GITHUB_ENV"
       - name: Upload dbt docs to R2
         if: env.DBT_ARTIFACTS_READY == 'true'
         env:
@@ -55,37 +54,27 @@ jobs:
           : "${AWS_DEFAULT_REGION:=auto}"
 
           SRC="analytics/artifacts/dbt"
-          if [ ! -f "${SRC}/index.html" ]; then
-            echo "dbt docs not found at ${SRC}/index.html. Skipping upload."
-            exit 0
-          fi
-
           R2_ENDPOINT="${R2_ENDPOINT}"
           BUCKET="s3://${R2_BUCKET}"
-          SHA_PREFIX="dbt_docs/${GITHUB_SHA}"
           LATEST_PREFIX="dbt_docs/latest"
 
-          aws s3 sync "${SRC}" "${BUCKET}/${SHA_PREFIX}" \
-            --endpoint-url "${R2_ENDPOINT}" \
-            --cache-control "no-cache"
           aws s3 sync "${SRC}" "${BUCKET}/${LATEST_PREFIX}" \
             --endpoint-url "${R2_ENDPOINT}" \
             --cache-control "no-cache" \
             --delete
       - name: Run Elementary models
-        if: env.DBT_ARTIFACTS_READY == 'true'
         continue-on-error: true
         run: |
           cd analytics/dbt
-          dbt run -s package:elementary --profiles-dir . --full-refresh
+          dbt run -s package:elementary --profiles-dir . --full-refresh || \
+            echo "Elementary models failed on DuckDB (ok)."
       - name: Generate Elementary report
-        if: env.DBT_ARTIFACTS_READY == 'true'
         continue-on-error: true
         run: |
           cd analytics/dbt
-          edr report --project-dir . --profiles-dir . --output-path ../artifacts/elementary
+          edr report --project-dir . --profiles-dir . --output-path ../artifacts/elementary || \
+            echo "Elementary report generation failed (ok)."
       - name: Upload Elementary report to R2
-        if: env.DBT_ARTIFACTS_READY == 'true'
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
@@ -96,18 +85,14 @@ jobs:
 
           SRC="analytics/artifacts/elementary"
           if [ ! -f "${SRC}/index.html" ]; then
-            echo "Elementary report not found at ${SRC}/index.html. Skipping upload."
+            echo "Elementary report not generated this run (ok)."
             exit 0
           fi
 
           R2_ENDPOINT="${R2_ENDPOINT}"
           BUCKET="s3://${R2_BUCKET}"
-          SHA_PREFIX="elementary/${GITHUB_SHA}"
           LATEST_PREFIX="elementary/latest"
 
-          aws s3 sync "${SRC}" "${BUCKET}/${SHA_PREFIX}" \
-            --endpoint-url "${R2_ENDPOINT}" \
-            --cache-control "no-cache"
           aws s3 sync "${SRC}" "${BUCKET}/${LATEST_PREFIX}" \
             --endpoint-url "${R2_ENDPOINT}" \
             --cache-control "no-cache" \
