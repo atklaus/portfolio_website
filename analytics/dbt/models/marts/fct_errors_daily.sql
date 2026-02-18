@@ -1,3 +1,10 @@
+{{ config(
+  tags=["iceberg"],
+  enabled=(target.name == "iceberg"),
+  database="r2_iceberg",
+  schema="analytics"
+) }}
+
 select
   date,
   count(*) as errors

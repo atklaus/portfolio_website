@@ -17,19 +17,10 @@ clean-targets:
 models:
   portfolio_analytics:
     +materialized: table
-    +database: r2_iceberg
-    +schema: analytics
     staging:
       +materialized: table
     marts:
       +materialized: table
 
 on-run-start:
-  - "INSTALL httpfs"
-  - "LOAD httpfs"
-  - "INSTALL iceberg"
-  - "LOAD iceberg"
-  - "SET s3_url_style='path'"
-  - "CREATE SECRET r2_s3 (TYPE S3, KEY_ID '{{ env_var('R2_ACCESS_KEY_ID') }}', SECRET '{{ env_var('R2_SECRET_ACCESS_KEY') }}', REGION 'auto', ENDPOINT 'https://{{ env_var('R2_ACCOUNT_ID') }}.r2.cloudflarestorage.com', URL_STYLE 'path')"
-  - "CREATE SECRET r2_catalog (TYPE ICEBERG, TOKEN '{{ env_var('R2_ICEBERG_TOKEN') }}')"
-  - "ATTACH '{{ env_var('R2_ICEBERG_WAREHOUSE') }}' AS r2_iceberg (TYPE ICEBERG, ENDPOINT '{{ env_var('R2_ICEBERG_CATALOG_URI') }}', SECRET 'r2_catalog')"
+  - "{{ attach_r2_iceberg_sql() }}"

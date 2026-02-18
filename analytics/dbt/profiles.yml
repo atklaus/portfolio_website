@@ -4,4 +4,18 @@ portfolio_analytics:
     local:
       type: duckdb
       path: "{{ env_var('DBT_DUCKDB_PATH', '../artifacts/warehouse.duckdb') }}"
+      schema: main
       threads: 4
+
+    iceberg:
+      type: duckdb
+      path: "{{ env_var('DBT_DUCKDB_PATH', '../artifacts/warehouse.duckdb') }}"
+      schema: main
+      threads: 4
+      settings:
+        s3_region: "{{ env_var('R2_REGION', 'auto') }}"
+        s3_endpoint: "{{ env_var('R2_ENDPOINT', '') }}"
+        s3_access_key_id: "{{ env_var('R2_ACCESS_KEY_ID', '') }}"
+        s3_secret_access_key: "{{ env_var('R2_SECRET_ACCESS_KEY', '') }}"
+        s3_url_style: "{{ env_var('R2_URL_STYLE', 'path') }}"
+        s3_use_ssl: "{{ env_var('R2_USE_SSL', 'true') }}"

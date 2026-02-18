@@ -35,8 +35,8 @@ jobs:
         run: |
           cd analytics/dbt
           if [ -f packages.yml ]; then dbt deps --profiles-dir .; fi
-          dbt build --profiles-dir .
-          dbt docs generate --profiles-dir . --target-path ../artifacts/dbt
+          dbt build --profiles-dir . --target iceberg
+          dbt docs generate --profiles-dir . --target iceberg --target-path ../artifacts/dbt
       - name: Upload dbt docs to R2
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
