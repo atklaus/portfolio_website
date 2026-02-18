@@ -47,10 +47,21 @@ def main() -> int:
         return 0
 
     try:
-        context = FileDataContext(str(gx_root))
+        context = FileDataContext(context_root_dir=str(gx_root))
+    except TypeError:
+        try:
+            context = FileDataContext(str(gx_root))
+        except Exception as exc:
+            print(f"GX context init failed: {exc}")
+            return 0
     except Exception as exc:
-        print(f"GX context init failed: {exc}")
-        return 0
+        try:
+            from great_expectations.data_context import get_context
+
+            context = get_context(context_root_dir=str(gx_root))
+        except Exception as inner_exc:
+            print(f"GX context init failed: {inner_exc}")
+            return 0
 
     try:
         context.run_checkpoint(checkpoint_name="hsqi_checkpoint")
