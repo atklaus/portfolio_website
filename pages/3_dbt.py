@@ -11,6 +11,7 @@ from shared.telemetry import page_guard
 
 
 DBT_DOCS_BASE_URL_DEFAULT = "https://public.databuilds.dev/dbt_docs/latest"
+GX_DOCS_BASE_URL_DEFAULT = "https://public.databuilds.dev/gx/latest"
 
 
 def _get_docs_base_url() -> str:
@@ -23,14 +24,14 @@ def _get_docs_base_url() -> str:
     return (base or DBT_DOCS_BASE_URL_DEFAULT).rstrip("/")
 
 
-def _get_elementary_base_url() -> str:
-    base = os.environ.get("ELEMENTARY_BASE_URL")
+def _get_gx_docs_base_url() -> str:
+    base = os.environ.get("GX_DOCS_BASE_URL")
     if not base:
         try:
-            base = st.secrets.get("ELEMENTARY_BASE_URL", "")
+            base = st.secrets.get("GX_DOCS_BASE_URL", "")
         except Exception:
             base = ""
-    return (base or "").rstrip("/")
+    return (base or GX_DOCS_BASE_URL_DEFAULT).rstrip("/")
 
 
 @st.cache_data(ttl=600, show_spinner=False)
@@ -50,6 +51,21 @@ def _fetch_optional_json(url: str) -> dict[str, Any] | None:
         return None
     response.raise_for_status()
     return response.json()
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def _url_available(url: str) -> bool:
+    try:
+        response = requests.head(url, timeout=5, allow_redirects=True)
+        if response.status_code < 400:
+            return True
+    except requests.RequestException:
+        return False
+    try:
+        response = requests.get(url, timeout=5, stream=True)
+        return response.status_code < 400
+    except requests.RequestException:
+        return False
 
 
 def _layer_for(node: dict[str, Any]) -> str:
@@ -184,7 +200,7 @@ with page_guard(os.path.basename(__file__)):
     with models_tab:
         st.caption(f"Source: {docs_base_url}")
 
-        left, right = st.columns([2, 1])
+        left, right = st.columns([2, 3])
         search_term = left.text_input("Search model name", value="")
         layer_options = ["stg", "int", "marts", "snapshots", "seeds", "other"]
         selected_layers = right.multiselect("Layer", layer_options, default=layer_options)
@@ -258,13 +274,10 @@ with page_guard(os.path.basename(__file__)):
         components.iframe(f"{docs_base_url}/index.html", height=1000, scrolling=True)
 
     with quality_tab:
-        elementary_base = _get_elementary_base_url()
-        if not elementary_base:
-            st.write("Elementary not configured yet. Set ELEMENTARY_BASE_URL to the hosted report base URL.")
+        gx_base_url = _get_gx_docs_base_url()
+        gx_index_url = f"{gx_base_url}/index.html"
+        if _url_available(gx_index_url):
+            st.link_button("Open GX docs in new tab", gx_index_url)
+            components.iframe(gx_index_url, height=1000, scrolling=True)
         else:
-            if elementary_base.endswith(".html"):
-                elementary_url = elementary_base
-            else:
-                elementary_url = f"{elementary_base}/index.html"
-            st.link_button("Open Elementary report", elementary_url)
-            components.iframe(elementary_url, height=1000, scrolling=True)
+            st.write("Great Expectations docs not available yet (last run may have failed).")

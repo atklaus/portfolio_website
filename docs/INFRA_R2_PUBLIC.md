@@ -11,13 +11,13 @@ rules so the docs can be embedded in the Streamlit app at https://databuilds.dev
 - R2 bucket name: `databuilds-public`
 - Public URL pattern: `https://public.databuilds.dev/<path>`
 - dbt docs entrypoint: `/dbt_docs/latest/index.html`
-- Elementary report entrypoint: `/elementary/latest/index.html`
+- GX docs entrypoint: `/gx/latest/index.html`
 
 Example:
 
 `https://public.databuilds.dev/dbt_docs/latest/index.html`
 
-`https://public.databuilds.dev/elementary/latest/index.html`
+`https://public.databuilds.dev/gx/latest/index.html`
 
 ## Required Response Headers
 
@@ -31,11 +31,10 @@ The Worker enforces the following headers on all responses:
 ## App Configuration
 
 The Streamlit app reads these environment variables (or `st.secrets`) for the
-dbt/Elementary embeds:
+dbt and GX embeds:
 
 - `DBT_DOCS_BASE_URL` (default: `https://public.databuilds.dev/dbt_docs/latest`)
-- `ELEMENTARY_BASE_URL` (optional, for the Quality tab, typically
-  `https://public.databuilds.dev/elementary/latest`)
+- `GX_DOCS_BASE_URL` (default: `https://public.databuilds.dev/gx/latest`)
 
 ## Worker Configuration
 
@@ -49,16 +48,11 @@ The Worker routes `public.databuilds.dev/*` and reads objects from the
 
 ## CI Uploads
 
-The GitHub Actions workflow `.github/workflows/dbt_docs.yaml`:
+The GitHub Actions workflow `.github/workflows/analytics_docs.yaml`:
 
 - Runs `dbt docs generate` in `analytics/dbt`.
-- Uploads `analytics/artifacts/dbt/` to R2 under `dbt_docs/<git_sha>/...` and
-  `dbt_docs/latest/...`.
-
-The GitHub Actions workflow `.github/workflows/elementary_report.yaml`:
-
-- Attempts to generate an Elementary report in `analytics/artifacts/elementary/`.
-- Uploads to `elementary/<git_sha>/...` and `elementary/latest/...` when present.
+- Uploads `analytics/artifacts/dbt/` to R2 under `dbt_docs/latest/...`.
+- Uploads `analytics/artifacts/gx/` to R2 under `gx/latest/...` when available.
 
 Cache headers are enforced at the Worker layer to ensure consistent behavior
 regardless of upload metadata.
