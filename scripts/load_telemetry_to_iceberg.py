@@ -1,22 +1,20 @@
 from __future__ import annotations
 
+import datetime as dt
 import os
 import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+import pandas as pd
+
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-import datetime as dt
-
-import pandas as pd
-
-from lib.storage.s3_compat import get_client, get_bucket
-
 from lib.duckdb_iceberg import connect_iceberg
+from lib.storage.s3_compat import get_bucket, get_client
 
 
 def _get_env(key: str, default: str = "") -> str:
@@ -54,12 +52,11 @@ def _has_parquet_files(con, glob: str) -> bool:
         raise
 
 
-# Helper: List parquet objects with etag and metadata
 def _list_parquet_objects(prefix: str) -> pd.DataFrame:
     """Return object metadata for parquet files under an S3/R2 prefix.
 
-    This is used for idempotency when parquet files are overwritten in-place
-    (same key, new ETag). We treat (source_file, etag) as the load key.
+    Used for idempotency when parquet keys may be overwritten in-place.
+    We treat (source_file, etag) as the load key.
     """
     client = get_client()
     bucket = get_bucket()
@@ -88,28 +85,20 @@ def _list_parquet_objects(prefix: str) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-# Helper: Ensure table columns exist for all columns in the staged view
 def _ensure_table_columns(con, table: str, view: str) -> None:
-    """Add missing columns to `table` based on `view` schema.
-
-    DuckDB will error if you try to insert columns that don't exist.
-    We compare view columns to table columns and ALTER TABLE to add any missing.
-    """
+    """Add missing columns to `table` based on `view` schema."""
     table_cols = {
         row[1]: row[2]
         for row in con.execute(f"PRAGMA table_info('{table}')").fetchall()
     }
 
-    # DuckDB supports DESCRIBE SELECT ...
     view_desc = con.execute(f"DESCRIBE SELECT * FROM {view}").fetchall()
     view_cols = [(row[0], row[1]) for row in view_desc]
 
     for col_name, col_type in view_cols:
         if col_name in table_cols:
             continue
-        # Be conservative with quoted identifiers
         con.execute(f'ALTER TABLE {table} ADD COLUMN "{col_name}" {col_type}')
-
 
 
 @dataclass(frozen=True)
@@ -156,9 +145,7 @@ def _create_raw_table(con, table: str, glob: str) -> None:
     )
 
 
-
 def _load_dataset(con, spec: DatasetSpec) -> dict[str, Any]:
-    # Stage all rows from parquet
     con.execute(
         """
         CREATE OR REPLACE TEMP VIEW staged_rows AS
@@ -175,7 +162,6 @@ def _load_dataset(con, spec: DatasetSpec) -> dict[str, Any]:
         [spec.glob],
     )
 
-    # File metadata for idempotency (handles overwritten parquet keys)
     meta_df = _list_parquet_objects(spec.prefix)
     if meta_df.empty:
         return {"dataset": spec.dataset, "new_files": 0, "new_rows": 0}
@@ -193,7 +179,6 @@ def _load_dataset(con, spec: DatasetSpec) -> dict[str, Any]:
         """
     )
 
-    # Identify new (file, etag) pairs
     con.execute(
         """
         CREATE OR REPLACE TEMP VIEW new_files AS
@@ -218,11 +203,8 @@ def _load_dataset(con, spec: DatasetSpec) -> dict[str, Any]:
     ).fetchone()[0]
 
     if file_count:
-        # Ensure target table can accept any evolved columns
         _ensure_table_columns(con, spec.table, "staged_rows")
 
-        # Insert BY NAME to avoid column-order issues. Extra columns in target
-        # will receive NULL if absent in the source.
         con.execute(
             f"""
             INSERT INTO {spec.table} BY NAME
@@ -248,25 +230,28 @@ def _load_dataset(con, spec: DatasetSpec) -> dict[str, Any]:
 
 def main() -> None:
     bucket = _require_env("R2_BUCKET")
+
     events_prefix = _get_env("TELEMETRY_EVENTS_PARQUET_PREFIX", "telemetry/events_parquet/")
     sessions_prefix = _get_env("TELEMETRY_SESSIONS_PARQUET_PREFIX", "telemetry/sessions_parquet/")
 
-    # Glob for parquet parts under hive partitions like date=YYYY-MM-DD
     events_glob = f"s3://{bucket}/{events_prefix}date=*/**/*.parquet"
     sessions_glob = f"s3://{bucket}/{sessions_prefix}date=*/**/*.parquet"
 
     con = connect_iceberg()
+
     import duckdb
 
     print(f"duckdb_version={duckdb.__version__}")
+
     _ensure_schemas(con)
 
     events_spec = DatasetSpec(
         dataset="website_events",
         table="r2_iceberg.raw.website_events",
         glob=events_glob,
-        prefix=f"{events_prefix}date=",
+        prefix=f"{events_prefix}",
     )
+
     if not _has_parquet_files(con, events_spec.glob):
         print("No event parquet files found; exiting.")
         return
@@ -280,7 +265,7 @@ def main() -> None:
             dataset="website_sessions",
             table="r2_iceberg.raw.website_sessions",
             glob=sessions_glob,
-            prefix=f"{sessions_prefix}date=",
+            prefix=f"{sessions_prefix}",
         )
         _create_raw_table(con, sessions_spec.table, sessions_spec.glob)
         sessions_result = _load_dataset(con, sessions_spec)
