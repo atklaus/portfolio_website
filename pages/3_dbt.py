@@ -121,8 +121,7 @@ def _bullet_list(items: list[str]) -> None:
 with page_guard(os.path.basename(__file__)):
     header.page_header("Analytics Ops", page_name=os.path.basename(__file__))
 
-    st.markdown("")
-    st.markdown("dbt docs + lineage powering this site")
+    st.info("dbt docs + lineage powering this site")
 
     docs_base_url = _get_docs_base_url()
     manifest_url = f"{docs_base_url}/manifest.json"
@@ -163,7 +162,7 @@ with page_guard(os.path.basename(__file__)):
             }
         )
 
-    st.subheader("Run summary")
+    st.markdown("Run summary")
     if run_results is None:
         st.caption("run_results.json not available (ok).")
     else:
@@ -183,7 +182,6 @@ with page_guard(os.path.basename(__file__)):
     models_tab, docs_tab, quality_tab = st.tabs(["Models", "Docs", "Obervability (experimental)"])
 
     with models_tab:
-        st.subheader("Models")
         st.caption(f"Source: {docs_base_url}")
 
         left, right = st.columns([2, 1])
@@ -256,12 +254,10 @@ with page_guard(os.path.basename(__file__)):
                     st.dataframe(pd.DataFrame(columns), use_container_width=True, hide_index=True)
 
     with docs_tab:
-        st.subheader("dbt docs")
         st.link_button("Open dbt docs in new tab", f"{docs_base_url}/index.html")
         components.iframe(f"{docs_base_url}/index.html", height=1000, scrolling=True)
 
     with quality_tab:
-        st.subheader("Observability / Data Quality")
         elementary_base = _get_elementary_base_url()
         if not elementary_base:
             st.write("Elementary not configured yet. Set ELEMENTARY_BASE_URL to the hosted report base URL.")

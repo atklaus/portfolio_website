@@ -3,7 +3,7 @@ portfolio_analytics:
   outputs:
     local:
       type: duckdb
-      path: ../artifacts/warehouse.duckdb
+      path: "{{ env_var('DBT_DUCKDB_PATH', '../artifacts/warehouse.duckdb') }}"
       threads: 4
 
 elementary:
@@ -11,5 +11,5 @@ elementary:
   outputs:
     local:
       type: duckdb
-      path: ../artifacts/warehouse.duckdb
+      path: "{{ env_var('DBT_DUCKDB_PATH', '../artifacts/warehouse.duckdb') }}"
       threads: 4
