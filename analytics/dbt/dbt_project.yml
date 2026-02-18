@@ -10,7 +10,6 @@ test-paths: ["tests"]
 seed-paths: ["seeds"]
 macro-paths: ["macros"]
 
-target-path: "../artifacts/dbt"
 clean-targets:
   - "../artifacts/dbt"
   - "dbt_packages"

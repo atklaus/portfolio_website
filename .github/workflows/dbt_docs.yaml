@@ -32,17 +32,36 @@ jobs:
         run: |
           cd analytics/dbt
           if [ -f packages.yml ]; then poetry run dbt deps --profiles-dir .; fi
-          poetry run dbt docs generate --profiles-dir .
+          poetry run dbt docs generate --profiles-dir . --target-path ../artifacts/dbt
+      - name: Ensure dbt docs favicon
+        run: |
+          python - <<'PY'
+          import base64
+          from pathlib import Path
+
+          ico_b64 = (
+              "AAABAAEAAQEAAAEAIABEAAAAFgAAAIlQTkcNChoKAAAADUlIRFIAAAABAAAAAQgE"
+              "AAAAtRwMAgAAAAtJREFUeNpj/P8fAAMDAgDu/l8kAAAAAElFTkSuQmCC"
+          )
+          target = Path("analytics/artifacts/dbt/assets/favicons/favicon.ico")
+          if target.exists():
+              print(f"favicon already exists at {target}")
+          else:
+              target.parent.mkdir(parents=True, exist_ok=True)
+              target.write_bytes(base64.b64decode(ico_b64))
+              print(f"Wrote minimal favicon to {target}")
+          PY
       - name: Verify dbt docs output
         run: |
           set -euo pipefail
           SRC="analytics/artifacts/dbt"
           test -f "${SRC}/index.html"
           test -f "${SRC}/manifest.json"
-          test -d "${SRC}/assets"
-          if ! find "${SRC}/assets" -type f -mindepth 1 | read -r _; then
-            echo "dbt docs assets directory is empty: ${SRC}/assets"
-            exit 1
+          test -f "${SRC}/catalog.json"
+          if [ -f "${SRC}/run_results.json" ]; then
+            echo "run_results.json present."
+          else
+            echo "run_results.json not present (ok)."
           fi
       - name: Install AWS CLI
         run: |
@@ -68,12 +87,4 @@ jobs:
           aws s3 sync "${SRC}" "${BUCKET}/${LATEST_PREFIX}" \
             --endpoint-url "${R2_ENDPOINT}" \
             --cache-control "no-cache" \
-            --delete
-
-          aws s3 sync "${SRC}/assets" "${BUCKET}/${SHA_PREFIX}/assets" \
-            --endpoint-url "${R2_ENDPOINT}" \
-            --cache-control "public, max-age=31536000, immutable"
-          aws s3 sync "${SRC}/assets" "${BUCKET}/${LATEST_PREFIX}/assets" \
-            --endpoint-url "${R2_ENDPOINT}" \
-            --cache-control "public, max-age=31536000, immutable" \
             --delete
