@@ -36,9 +36,25 @@ def connect_iceberg():
     account_id = _require_secret("R2_ACCOUNT_ID")
     access_key = _require_secret("R2_ACCESS_KEY_ID")
     secret_key = _require_secret("R2_SECRET_ACCESS_KEY")
+
+    # Optional override for S3 endpoint (useful for local/dev). If not provided,
+    # default to the Cloudflare R2 account endpoint.
+    r2_endpoint = _get_secret("R2_ENDPOINT")
+    if r2_endpoint:
+        r2_endpoint = r2_endpoint.strip()
+        if not r2_endpoint.startswith(("http://", "https://")):
+            r2_endpoint = "https://" + r2_endpoint.lstrip("/")
+    else:
+        r2_endpoint = f"https://{account_id}.r2.cloudflarestorage.com"
+
     catalog_uri = _require_secret("R2_ICEBERG_CATALOG_URI")
     warehouse = _require_secret("R2_ICEBERG_WAREHOUSE")
     token = _require_secret("R2_ICEBERG_TOKEN")
+
+    # Ensure Iceberg REST catalog URI includes scheme
+    catalog_uri = catalog_uri.strip()
+    if catalog_uri and not catalog_uri.startswith(("http://", "https://")):
+        catalog_uri = "https://" + catalog_uri.lstrip("/")
 
     con = duckdb.connect()
     print(f"duckdb_version={duckdb.__version__}")
@@ -51,7 +67,10 @@ def connect_iceberg():
         con.execute(f"LOAD {ext}")
     con.execute("SET s3_url_style='path'")
 
-    endpoint = f"https://{account_id}.r2.cloudflarestorage.com"
+    # Make sure DuckDB httpfs uses the same endpoint and path-style URLs for R2
+    con.execute("SET s3_endpoint=?", [r2_endpoint])
+    con.execute("SET s3_region='auto'")
+
     # Make reruns idempotent
     con.execute("DROP SECRET IF EXISTS r2_s3")
     con.execute("DROP SECRET IF EXISTS r2_catalog")
@@ -63,7 +82,7 @@ def connect_iceberg():
             KEY_ID '{_sql_escape(access_key)}',
             SECRET '{_sql_escape(secret_key)}',
             REGION 'auto',
-            ENDPOINT '{_sql_escape(endpoint)}',
+            ENDPOINT '{_sql_escape(r2_endpoint)}',
             URL_STYLE 'path'
         )
         """
