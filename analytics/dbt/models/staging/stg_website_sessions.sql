@@ -18,18 +18,3 @@ select
   source_file,
   ingested_at
 from {{ source('raw', 'website_sessions') }}
-{% else %}
-select
-  cast(null as timestamp) as ts_utc,
-  cast(null as date) as date,
-  cast(null as varchar) as session_id,
-  cast(null as varchar) as pages_visited,
-  cast(null as bigint) as event_count,
-  cast(null as bigint) as error_count,
-  cast(null as bigint) as total_runtime_ms,
-  cast(null as varchar) as app_version,
-  cast(null as varchar) as last_page,
-  cast(null as varchar) as source_file,
-  cast(null as timestamp) as ingested_at
-where false
-{% endif %}

@@ -4,7 +4,6 @@
   schema="analytics"
 ) }}
 
-
 select
   cast(ts as timestamp) as ts,
   cast(date as date) as date,
