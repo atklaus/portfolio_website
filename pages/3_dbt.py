@@ -121,7 +121,7 @@ def _bullet_list(items: list[str]) -> None:
 with page_guard(os.path.basename(__file__)):
     header.page_header("Analytics Ops", page_name=os.path.basename(__file__))
 
-    st.info("dbt docs + lineage powering this site")
+    st.subheader("dbt docs + lineage powering this site")
 
     docs_base_url = _get_docs_base_url()
     manifest_url = f"{docs_base_url}/manifest.json"
