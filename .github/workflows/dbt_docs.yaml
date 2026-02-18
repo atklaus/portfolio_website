@@ -1,0 +1,75 @@
+name: dbt-docs
+
+on:
+  push:
+    branches:
+      - master
+      - main
+  workflow_dispatch:
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    env:
+      R2_BUCKET: databuilds-public
+      R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+      R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+      R2_REGION: ${{ secrets.R2_REGION }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+      - name: Install Poetry
+        run: |
+          python -m pip install --upgrade pip
+          pip install poetry==2.0.1
+      - name: Install dependencies
+        run: |
+          poetry install --with analytics --no-interaction --no-ansi
+      - name: Prepare dbt profile
+        run: |
+          cp analytics/dbt/profiles.yml.example analytics/dbt/profiles.yml
+      - name: Generate dbt docs
+        run: |
+          cd analytics/dbt
+          if [ -f packages.yml ]; then poetry run dbt deps --profiles-dir .; fi
+          poetry run dbt docs generate --profiles-dir .
+      - name: Install AWS CLI
+        run: |
+          python -m pip install --upgrade awscli
+      - name: Upload dbt docs to R2
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: ${{ secrets.R2_REGION }}
+          AWS_EC2_METADATA_DISABLED: "true"
+        run: |
+          : "${AWS_DEFAULT_REGION:=auto}"
+
+          R2_ENDPOINT="${R2_ENDPOINT}"
+          BUCKET="s3://${R2_BUCKET}"
+          SRC="analytics/dbt/target"
+          SHA_PREFIX="dbt_docs/${GITHUB_SHA}"
+          LATEST_PREFIX="dbt_docs/latest"
+
+          aws s3 sync "${SRC}/assets" "${BUCKET}/${SHA_PREFIX}/assets" \
+            --endpoint-url "${R2_ENDPOINT}" \
+            --cache-control "public, max-age=31536000, immutable"
+          aws s3 sync "${SRC}/assets" "${BUCKET}/${LATEST_PREFIX}/assets" \
+            --endpoint-url "${R2_ENDPOINT}" \
+            --cache-control "public, max-age=31536000, immutable" \
+            --delete
+
+          aws s3 sync "${SRC}" "${BUCKET}/${SHA_PREFIX}" \
+            --endpoint-url "${R2_ENDPOINT}" \
+            --exclude "assets/*" \
+            --exclude "assets/**" \
+            --cache-control "no-cache"
+          aws s3 sync "${SRC}" "${BUCKET}/${LATEST_PREFIX}" \
+            --endpoint-url "${R2_ENDPOINT}" \
+            --exclude "assets/*" \
+            --exclude "assets/**" \
+            --cache-control "no-cache" \
+            --delete

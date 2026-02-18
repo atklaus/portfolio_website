@@ -1,0 +1,9 @@
+name = "databuilds-public"
+main = "src/index.js"
+compatibility_date = "2026-02-18"
+
+routes = ["public.databuilds.dev/*"]
+
+[[r2_buckets]]
+binding = "PUBLIC_BUCKET"
+bucket_name = "databuilds-public"
