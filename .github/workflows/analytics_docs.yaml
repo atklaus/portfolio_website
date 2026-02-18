@@ -39,8 +39,13 @@ jobs:
         run: |
           cd analytics/dbt
           if [ -f packages.yml ]; then dbt deps --profiles-dir .; fi
-          dbt build --profiles-dir . --target iceberg --exclude package:elementary
+          dbt build --profiles-dir . --target iceberg
           dbt docs generate --profiles-dir . --target iceberg --target-path ../artifacts/dbt
+      - name: Log attached catalogs (non-blocking)
+        continue-on-error: true
+        run: |
+          cd analytics/dbt
+          dbt run-operation debug_attached_catalogs --profiles-dir . --target iceberg
       - name: Verify dbt artifacts
         run: |
           set -euo pipefail

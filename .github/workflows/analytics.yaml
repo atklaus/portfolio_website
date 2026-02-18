@@ -33,3 +33,8 @@ jobs:
           cd analytics/dbt
           if [ -f packages.yml ]; then poetry run dbt deps --profiles-dir .; fi
           poetry run dbt build --profiles-dir . --target iceberg
+      - name: Log attached catalogs (non-blocking)
+        continue-on-error: true
+        run: |
+          cd analytics/dbt
+          poetry run dbt run-operation debug_attached_catalogs --profiles-dir . --target iceberg

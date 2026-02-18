@@ -23,4 +23,4 @@ models:
       +materialized: table
 
 on-run-start:
-  - "{{ attach_r2_iceberg_sql() }}"
+  - "{{ attach_r2_iceberg_if_needed() }}"
