@@ -6,15 +6,15 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
 import datetime as dt
 
 import pandas as pd
 
 from lib.storage.s3_compat import get_client, get_bucket
-
-ROOT = Path(__file__).resolve().parents[1]
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
 
 from lib.duckdb_iceberg import connect_iceberg
 
