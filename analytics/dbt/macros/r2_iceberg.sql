@@ -30,7 +30,7 @@
     {% do run_query("LOAD httpfs") %}
 
     {# Iceberg: force a modern extension bundle (CI commonly lags otherwise) #}
-    {% do run_query("FORCE INSTALL iceberg FROM core_nightly") %}
+    {% do run_query("INSTALL iceberg") %}
     {% do run_query("LOAD iceberg") %}
 
     {# Debug: confirm extension is actually loaded #}
