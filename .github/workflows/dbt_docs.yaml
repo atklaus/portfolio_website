@@ -30,7 +30,7 @@ jobs:
           poetry install --with analytics --no-interaction --no-ansi
       - name: Prepare dbt profile
         run: |
-          cp analytics/dbt/profiles.yml.example analytics/dbt/profiles.yml
+          cp analytics/dbt/profiles.yml analytics/dbt/profiles.yml
       - name: Generate dbt docs
         run: |
           cd analytics/dbt
