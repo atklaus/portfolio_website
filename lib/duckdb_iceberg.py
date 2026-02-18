@@ -41,17 +41,25 @@ def connect_iceberg():
     token = _require_secret("R2_ICEBERG_TOKEN")
 
     con = duckdb.connect()
-    con.execute("INSTALL httpfs")
-    con.execute("LOAD httpfs")
-    con.execute("INSTALL iceberg")
-    con.execute("LOAD iceberg")
+    print(f"duckdb_version={duckdb.__version__}")
+    # Extensions must be loaded before using Iceberg secret providers.
+    for ext in ("httpfs", "iceberg"):
+        try:
+            con.execute(f"INSTALL {ext}")
+        except Exception:
+            pass
+        con.execute(f"LOAD {ext}")
     con.execute("SET s3_url_style='path'")
 
     endpoint = f"https://{account_id}.r2.cloudflarestorage.com"
+    # Make reruns idempotent
+    con.execute("DROP SECRET IF EXISTS r2_s3")
+    con.execute("DROP SECRET IF EXISTS r2_catalog")
+    con.execute("DETACH DATABASE IF EXISTS r2_iceberg")
     con.execute(
         f"""
         CREATE SECRET r2_s3 (
-            TYPE S3,
+            TYPE s3,
             KEY_ID '{_sql_escape(access_key)}',
             SECRET '{_sql_escape(secret_key)}',
             REGION 'auto',
@@ -63,7 +71,7 @@ def connect_iceberg():
     con.execute(
         f"""
         CREATE SECRET r2_catalog (
-            TYPE ICEBERG,
+            TYPE iceberg,
             TOKEN '{_sql_escape(token)}'
         )
         """
@@ -71,7 +79,7 @@ def connect_iceberg():
     con.execute(
         f"""
         ATTACH '{_sql_escape(warehouse)}' AS r2_iceberg
-        (TYPE ICEBERG, ENDPOINT '{_sql_escape(catalog_uri)}', SECRET 'r2_catalog')
+        (TYPE iceberg, ENDPOINT '{_sql_escape(catalog_uri)}', SECRET r2_catalog)
         """
     )
     return con
