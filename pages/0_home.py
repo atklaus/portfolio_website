@@ -62,21 +62,11 @@ with page_guard(os.path.basename(__file__)):
         "ellipses": "🫧",
     }
 
-    dbt_docs_card = ProjectCard(
-        title="dbt docs",
-        description="Lineage + docs for everything powering this site",
-        icon="🧬",
-        destination="/dbt",
-        tags=("platform",),
-    )
-
     featured_cards = []
     fun_cards = []
     for mod in show_mod_dict.keys():
         mod_entry = show_mod_dict[mod]
         if mod_entry.get("hidden") or (mod_entry.get("group") or "").lower() == "admin":
-            continue
-        if mod_entry.get("name") == "dbt":
             continue
         icon, title = _split_label(mod_entry["button"])
         icon = ICON_OVERRIDES.get(mod_entry["name"], icon)
@@ -93,8 +83,6 @@ with page_guard(os.path.basename(__file__)):
             featured_cards.append(card)
         else:
             fun_cards.append(card)
-
-    featured_cards.insert(0, dbt_docs_card)
 
     if featured_cards:
         st.markdown('<div id="featured"></div><div class="content-shell ads-section-tight"><h3 class="section-title">Featured Projects</h3>', unsafe_allow_html=True)

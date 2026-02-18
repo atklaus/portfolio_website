@@ -25,6 +25,14 @@ The Worker enforces the following headers on all responses:
 - Cache-Control rule: `index.html` and `*.json` -> `no-cache`
 - Cache-Control rule: `/assets/*` -> `public, max-age=31536000, immutable`
 
+## App Configuration
+
+The Streamlit app reads these environment variables (or `st.secrets`) for the
+dbt/Elementary embeds:
+
+- `DBT_DOCS_BASE_URL` (default: `https://public.databuilds.dev/dbt_docs/latest`)
+- `ELEMENTARY_BASE_URL` (optional, for the Quality tab)
+
 ## Worker Configuration
 
 Worker source and config live in:
