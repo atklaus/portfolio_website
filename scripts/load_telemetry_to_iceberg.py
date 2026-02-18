@@ -31,6 +31,10 @@ def _require_env(key: str) -> str:
     return value
 
 
+def _sql_escape(value: str) -> str:
+    return value.replace("'", "''")
+
+
 def _has_parquet_files(con, glob: str) -> bool:
     try:
         con.execute(
@@ -127,6 +131,7 @@ def _ensure_schemas(con) -> None:
 
 
 def _create_raw_table(con, table: str, glob: str) -> None:
+    glob_literal = _sql_escape(glob)
     con.execute(
         f"""
         CREATE TABLE IF NOT EXISTS {table} AS
@@ -134,32 +139,32 @@ def _create_raw_table(con, table: str, glob: str) -> None:
             * EXCLUDE (filename),
             filename AS source_file,
             now() AS ingested_at
-        FROM read_parquet(?,
+        FROM read_parquet('{glob_literal}',
             hive_partitioning=true,
             filename=true,
             union_by_name=true
         )
         LIMIT 0
-        """,
-        [glob],
+        """
     )
 
 
 def _load_dataset(con, spec: DatasetSpec) -> dict[str, Any]:
+    glob_literal = _sql_escape(spec.glob)
+    dataset_literal = _sql_escape(spec.dataset)
     con.execute(
-        """
+        f"""
         CREATE OR REPLACE TEMP VIEW staged_rows AS
         SELECT
             * EXCLUDE (filename),
             filename AS source_file,
             now() AS ingested_at
-        FROM read_parquet(?,
+        FROM read_parquet('{glob_literal}',
             hive_partitioning=true,
             filename=true,
             union_by_name=true
         )
-        """,
-        [spec.glob],
+        """
     )
 
     meta_df = _list_parquet_objects(spec.prefix)
@@ -180,17 +185,16 @@ def _load_dataset(con, spec: DatasetSpec) -> dict[str, Any]:
     )
 
     con.execute(
-        """
+        f"""
         CREATE OR REPLACE TEMP VIEW new_files AS
         SELECT DISTINCT fm.source_file, fm.etag, fm.size_bytes, fm.last_modified
         FROM file_meta fm
         LEFT JOIN r2_iceberg.raw.loaded_files lf
-          ON lf.dataset = ?
+          ON lf.dataset = '{dataset_literal}'
          AND lf.source_file = fm.source_file
          AND coalesce(lf.etag, '') = coalesce(fm.etag, '')
         WHERE lf.source_file IS NULL
-        """,
-        [spec.dataset],
+        """
     )
 
     file_count = con.execute("SELECT COUNT(*) FROM new_files").fetchone()[0]
