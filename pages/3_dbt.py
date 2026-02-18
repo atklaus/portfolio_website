@@ -263,12 +263,11 @@ with page_guard(os.path.basename(__file__)):
         st.subheader("Quality")
         elementary_base = _get_elementary_base_url()
         if not elementary_base:
-            st.write("Elementary not configured yet.")
-            st.caption("Set ELEMENTARY_BASE_URL to the hosted Elementary report location.")
+            st.write("Elementary not configured yet. Set ELEMENTARY_BASE_URL to the hosted report base URL.")
         else:
             if elementary_base.endswith(".html"):
                 elementary_url = elementary_base
             else:
                 elementary_url = f"{elementary_base}/index.html"
-            st.link_button("Open Elementary in new tab", elementary_url)
+            st.link_button("Open Elementary report", elementary_url)
             components.iframe(elementary_url, height=1000, scrolling=True)
