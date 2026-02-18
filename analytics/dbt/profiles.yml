@@ -12,4 +12,5 @@ elementary:
     local:
       type: duckdb
       path: "{{ env_var('DBT_DUCKDB_PATH', '../artifacts/warehouse.duckdb') }}"
+      schema: main_elementary
       threads: 4
