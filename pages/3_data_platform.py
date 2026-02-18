@@ -195,7 +195,7 @@ with page_guard(os.path.basename(__file__)):
         c3.metric("Total exec time (s)", f"{total_exec_time:.2f}")
         c4.metric("Failures/Errors", str(failures))
 
-    models_tab, docs_tab, quality_tab = st.tabs(["Models", "Docs", "Obervability (experimental)"])
+    models_tab, docs_tab, quality_tab = st.tabs(["Models", "Docs", "Quality"])
 
     with models_tab:
         st.caption(f"Source: {docs_base_url}")

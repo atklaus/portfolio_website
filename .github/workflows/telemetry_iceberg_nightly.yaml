@@ -1,0 +1,55 @@
+name: telemetry_iceberg_nightly
+
+on:
+  schedule:
+    - cron: "30 3 * * *"
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+      R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+      R2_BUCKET: ${{ secrets.R2_BUCKET }}
+      R2_ICEBERG_CATALOG_URI: ${{ secrets.R2_ICEBERG_CATALOG_URI }}
+      R2_ICEBERG_WAREHOUSE: ${{ secrets.R2_ICEBERG_WAREHOUSE }}
+      R2_ICEBERG_TOKEN: ${{ secrets.R2_ICEBERG_TOKEN }}
+      DBT_DUCKDB_PATH: ${{ github.workspace }}/analytics/artifacts/warehouse.duckdb
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+          cache: "pip"
+      - name: Install dbt + duckdb + awscli
+        run: |
+          python -m pip install --upgrade pip
+          pip install "dbt-core==1.8.7" "dbt-duckdb==1.8.0" "duckdb==0.10.3" awscli
+      - name: Prepare artifacts directory
+        run: |
+          mkdir -p analytics/artifacts
+          echo "DBT_DUCKDB_PATH=${DBT_DUCKDB_PATH}"
+      - name: Run dbt build + docs
+        run: |
+          cd analytics/dbt
+          if [ -f packages.yml ]; then dbt deps --profiles-dir .; fi
+          dbt build --profiles-dir .
+          dbt docs generate --profiles-dir . --target-path ../artifacts/dbt
+      - name: Upload dbt docs to R2
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: "auto"
+          AWS_EC2_METADATA_DISABLED: "true"
+        run: |
+          SRC="analytics/artifacts/dbt"
+          R2_ENDPOINT="https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
+          BUCKET="s3://${R2_BUCKET}"
+          LATEST_PREFIX="dbt_docs/latest"
+
+          aws s3 sync "${SRC}" "${BUCKET}/${LATEST_PREFIX}" \
+            --endpoint-url "${R2_ENDPOINT}" \
+            --cache-control "no-cache" \
+            --delete

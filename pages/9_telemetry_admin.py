@@ -20,6 +20,7 @@ from lib.storage.s3_compat import (
     is_configured,
     s3_url,
 )
+from lib.telemetry_store import TelemetryStore
 from shared.errors_ui import render_error_banner
 from shared.settings import get_settings
 from shared.telemetry import page_guard
@@ -129,7 +130,7 @@ def _events_parquet_globs_for_range(
             return (
                 [
                     s3_url(
-                        "telemetry/events_parquet/date=*/*.parquet",
+                        "telemetry/events/date=*/**/*.parquet",
                         storage_config,
                     )
                 ],
@@ -137,17 +138,17 @@ def _events_parquet_globs_for_range(
             )
         globs = [
             s3_url(
-                f"telemetry/events_parquet/date={day.isoformat()}/*.parquet",
+                f"telemetry/events/date={day.isoformat()}/**/*.parquet",
                 storage_config,
             )
             for day in days
         ]
         return globs, "daily"
 
-    log_dir = Path("data/logs") / "events_parquet"
+    log_dir = Path("data/logs") / "events"
     if strategy == "broad":
-        return [str(log_dir / "date=*" / "*.parquet")], "broad"
-    return [str(log_dir / f"date={day.isoformat()}" / "*.parquet") for day in days], "daily"
+        return [str(log_dir / "date=*" / "**" / "*.parquet")], "broad"
+    return [str(log_dir / f"date={day.isoformat()}" / "**" / "*.parquet") for day in days], "daily"
 
 
 def _events_range_key(start_date: datetime.date, end_date: datetime.date) -> str:
@@ -336,6 +337,11 @@ def _duckdb_connection(httpfs_items: tuple[tuple[str, Any], ...]):
             else:
                 con.execute(f"SET {key}='{value}'")
     return con
+
+
+@st.cache_resource
+def _telemetry_store():
+    return TelemetryStore()
 
 
 @st.cache_data(ttl=300, max_entries=10)
@@ -1015,6 +1021,7 @@ with page_guard(os.path.basename(__file__)):
     config = get_config()
     storage_config = get_storage_config()
     use_storage, events_glob, sessions_glob = _storage_paths(config)
+    telemetry_store = _telemetry_store()
 
     if use_storage and st.button("Check data freshness"):
         try:
@@ -1037,6 +1044,21 @@ with page_guard(os.path.basename(__file__)):
             st.caption(f"Endpoint: {endpoint}")
             st.caption(f"DuckDB endpoint: {duckdb_httpfs_config(storage_config).get('s3_endpoint')}")
             st.caption(f"DuckDB use_ssl: {duckdb_httpfs_config(storage_config).get('s3_use_ssl')}")
+            iceberg_status = telemetry_store.ingestion_status()
+            if iceberg_status:
+                st.caption(
+                    "Iceberg events rows: "
+                    f"{iceberg_status.get('events_rows') or 0} · "
+                    f"last ingested: {iceberg_status.get('events_last_ingested_at') or 'unknown'}"
+                )
+                if iceberg_status.get("sessions_rows") is not None:
+                    st.caption(
+                        "Iceberg sessions rows: "
+                        f"{iceberg_status.get('sessions_rows') or 0} · "
+                        f"last ingested: {iceberg_status.get('sessions_last_ingested_at') or 'unknown'}"
+                    )
+            else:
+                st.caption("Iceberg status: unavailable")
             if st.button("Reset DuckDB connection"):
                 st.cache_resource.clear()
                 st.cache_data.clear()
@@ -1064,61 +1086,23 @@ with page_guard(os.path.basename(__file__)):
             start_7d, end_7d = _default_range(7)
             start_30d, end_30d = _default_range(30)
 
-            source_7d = _events_source_for_range(start_7d, end_7d, use_storage, storage_config)
-            source_30d = _events_source_for_range(start_30d, end_30d, use_storage, storage_config)
-            if source_30d["source"] == "json" and (end_30d - start_30d).days > 7:
-                st.warning("Parquet is missing for some dates. Limiting overview to 7 days.")
-                start_30d, end_30d = _default_range(7)
-                source_30d = _events_source_for_range(
-                    start_30d, end_30d, use_storage, storage_config
-                )
-            if _parquet_partial(source_7d.get("range_key")):
-                st.warning("Some partitions missing, results may be partial.")
+            overview_7d = telemetry_store.fetch_overview(start_7d, end_7d)
+            overview_30d = telemetry_store.fetch_overview(start_30d, end_30d)
             source_label = (
-                "JSONL (slow)"
-                if source_7d["source"] == "json" or _parquet_unavailable(source_7d.get("range_key"))
-                else "Parquet (fast)"
+                "Iceberg (analytics)"
+                if overview_7d.source == "iceberg"
+                else "Parquet (raw)"
             )
             st.caption(f"Data source: {source_label}")
 
-            sessions_7d = _fetch_sessions_count(
-                sessions_glob, start_7d, end_7d, use_storage, storage_config
-            )
-            sessions_30d = _fetch_sessions_count(
-                sessions_glob, start_30d, end_30d, use_storage, storage_config
-            )
-
-            pageviews_where_7d = f"{source_7d['columns']['event']} = 'page_view'"
-            pageviews_where_30d = f"{source_30d['columns']['event']} = 'page_view'"
-            errors_where_7d = f"{source_7d['columns']['event']} = 'error'"
-            errors_where_30d = f"{source_30d['columns']['event']} = 'error'"
-
-            pageviews_7d = _fetch_event_count(
-                source_7d, start_7d, end_7d, pageviews_where_7d,
-                use_storage,
-                storage_config,
-            )
-            pageviews_30d = _fetch_event_count(
-                source_30d, start_30d, end_30d, pageviews_where_30d,
-                use_storage,
-                storage_config,
-            )
-
-            events_7d = _fetch_event_count(source_7d, start_7d, end_7d, None, use_storage, storage_config)
-            events_30d = _fetch_event_count(
-                source_30d, start_30d, end_30d, None, use_storage, storage_config
-            )
-
-            errors_7d = _fetch_event_count(
-                source_7d, start_7d, end_7d, errors_where_7d,
-                use_storage,
-                storage_config,
-            )
-            errors_30d = _fetch_event_count(
-                source_30d, start_30d, end_30d, errors_where_30d,
-                use_storage,
-                storage_config,
-            )
+            sessions_7d = overview_7d.sessions
+            sessions_30d = overview_30d.sessions
+            pageviews_7d = overview_7d.pageviews
+            pageviews_30d = overview_30d.pageviews
+            events_7d = overview_7d.events
+            events_30d = overview_30d.events
+            errors_7d = overview_7d.errors
+            errors_30d = overview_30d.errors
 
             st.markdown("**Last 7 days**")
             cols = st.columns(5)
@@ -1139,12 +1123,8 @@ with page_guard(os.path.basename(__file__)):
             st.markdown("---")
             st.markdown("### Daily trends")
             try:
-                sessions_daily = _fetch_sessions_daily(
-                    sessions_glob, start_30d, end_30d, use_storage, storage_config
-                )
-                pageviews_daily = _fetch_pageviews_daily(
-                    source_30d, start_30d, end_30d, use_storage, storage_config
-                )
+                sessions_daily = overview_30d.sessions_daily
+                pageviews_daily = overview_30d.pageviews_daily
                 trend = sessions_daily.merge(pageviews_daily, on="date", how="outer")
                 trend = trend.fillna(0).sort_values("date")
                 if not trend.empty:

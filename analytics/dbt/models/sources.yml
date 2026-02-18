@@ -1,0 +1,9 @@
+version: 2
+
+sources:
+  - name: raw
+    database: r2_iceberg
+    schema: raw
+    tables:
+      - name: website_events
+      - name: website_sessions

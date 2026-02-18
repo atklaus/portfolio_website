@@ -66,12 +66,12 @@ MOD_ACCESS = {
     ,'tags': ('Data Engineering', 'ETL', 'Fuzzy Matching', 'Record Linkage')
     }
 
-    ,'dbt': {
-    'button': '🧬 dbt docs'
-    ,'name': 'dbt'
+    ,'data_platform': {
+    'button': '🧬 Data Platform'
+    ,'name' : 'data_platform'
     ,'description': 'Lineage + docs for everything powering this site'
     ,'group': 'featured'
-    ,'tags': ('platform',)
+    ,'tags': ('Platform','Infrastructure','Data Engineering')
     }
 
     ,'telemetry_admin': {

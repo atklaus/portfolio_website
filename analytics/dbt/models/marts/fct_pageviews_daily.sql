@@ -1,0 +1,7 @@
+select
+  date,
+  count(*) as pageviews
+from {{ ref('stg_website_events') }}
+where event_name = 'page_view'
+group by date
+order by date

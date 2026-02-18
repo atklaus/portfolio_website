@@ -30,11 +30,6 @@ _OVERRIDES: dict[str, dict[str, object]] = {
         "icon": "🏠",
         "description": "End-to-end data products, pipelines, and applied ML with production-grade reliability.",
     },
-    "dbt": {
-        "title": "dbt",
-        "icon": "🧬",
-        "description": "dbt docs + lineage for this site.",
-    },
     "telemetry_admin": {
         "key": "telemetry",
         "title": "Site Analytics",
