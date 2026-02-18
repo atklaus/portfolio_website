@@ -26,8 +26,15 @@
   {% set safe_token = token | replace("'", "''") %}
 
   {% if execute %}
+    {% set marker = run_query("select 1 from duckdb_tables() where table_name = 'r2_iceberg_attach_marker' and temporary") %}
+    {% if marker and marker.rows and (marker.rows | length) > 0 %}
+      {{ log("r2_iceberg already attached on this connection; skipping attach.", info=True) }}
+      {{ return("select 1") }}
+    {% endif %}
+
     {% set existing = run_query("select 1 from duckdb_databases() where database_name = 'r2_iceberg' limit 1") %}
     {% if existing and existing.rows and (existing.rows | length) > 0 %}
+      {% do run_query("create temp table if not exists r2_iceberg_attach_marker(dummy int)") %}
       {{ log("r2_iceberg already attached on this connection; skipping attach.", info=True) }}
       {{ return("select 1") }}
     {% endif %}
@@ -47,9 +54,8 @@
 
     {# Secret provider is registered by the iceberg extension; this is where you were failing #}
     {% do run_query("CREATE OR REPLACE SECRET r2_iceberg_secret (TYPE iceberg, TOKEN '" ~ safe_token ~ "')") %}
-
-    {% do run_query("DETACH DATABASE IF EXISTS r2_iceberg") %}
     {% do run_query("ATTACH '" ~ safe_warehouse ~ "' AS r2_iceberg (TYPE iceberg, ENDPOINT '" ~ safe_catalog_uri ~ "', SECRET r2_iceberg_secret)") %}
+    {% do run_query("create temp table if not exists r2_iceberg_attach_marker(dummy int)") %}
 
     {% set dbs = run_query("select database_name from duckdb_databases()") %}
     {% if dbs %}
