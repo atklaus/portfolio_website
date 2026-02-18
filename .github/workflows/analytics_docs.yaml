@@ -1,101 +1,10 @@
-name: analytics_docs
+name: analytics_docs (disabled)
 
 on:
-  push:
-    branches:
-      - master
-      - main
   workflow_dispatch:
 
 jobs:
-  publish:
+  disabled:
     runs-on: ubuntu-latest
-    env:
-      R2_BUCKET: databuilds-public
-      R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
-      R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
-      R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
-      R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-      R2_REGION: ${{ secrets.R2_REGION }}
-      R2_ICEBERG_CATALOG_URI: ${{ secrets.R2_ICEBERG_CATALOG_URI }}
-      R2_ICEBERG_WAREHOUSE: ${{ secrets.R2_ICEBERG_WAREHOUSE }}
-      R2_ICEBERG_TOKEN: ${{ secrets.R2_ICEBERG_TOKEN }}
-      DBT_DUCKDB_PATH: ${{ github.workspace }}/analytics/artifacts/warehouse.duckdb
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.10"
-          cache: "pip"
-      - name: Install dbt + GX + awscli
-        run: |
-          python -m pip install --upgrade pip
-          pip install \
-            "dbt-core==1.8.7" \
-            "dbt-duckdb==1.8.0" \
-            "duckdb>=1.4.0,<2.0.0" \
-            "great-expectations>=0.18,<0.19" \
-            awscli
-      - name: Prepare artifacts directory
-        run: |
-          mkdir -p analytics/artifacts
-          echo "DBT_DUCKDB_PATH=${DBT_DUCKDB_PATH}"
-      - name: Build dbt artifacts (required)
-        run: |
-          cd analytics/dbt
-          if [ -f packages.yml ]; then dbt deps --profiles-dir .; fi
-          dbt build --profiles-dir . --target iceberg
-          dbt docs generate --profiles-dir . --target iceberg --target-path ../artifacts/dbt
-      - name: Verify dbt artifacts
-        run: |
-          set -euo pipefail
-          SRC="analytics/artifacts/dbt"
-          test -f "${SRC}/index.html"
-          test -f "${SRC}/manifest.json"
-          test -f "${SRC}/catalog.json"
-          echo "DBT_ARTIFACTS_READY=true" >> "$GITHUB_ENV"
-      - name: Upload dbt docs to R2
-        if: env.DBT_ARTIFACTS_READY == 'true'
-        env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-          AWS_DEFAULT_REGION: ${{ secrets.R2_REGION }}
-          AWS_EC2_METADATA_DISABLED: "true"
-        run: |
-          : "${AWS_DEFAULT_REGION:=auto}"
-
-          SRC="analytics/artifacts/dbt"
-          R2_ENDPOINT="${R2_ENDPOINT}"
-          BUCKET="s3://${R2_BUCKET}"
-          LATEST_PREFIX="dbt_docs/latest"
-
-          aws s3 sync "${SRC}" "${BUCKET}/${LATEST_PREFIX}" \
-            --endpoint-url "${R2_ENDPOINT}" \
-            --cache-control "no-cache" \
-            --delete
-      - name: Run Great Expectations (non-blocking)
-        run: |
-          python scripts/run_gx.py || true
-      - name: Upload GX docs to R2 (if present)
-        env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-          AWS_DEFAULT_REGION: ${{ secrets.R2_REGION }}
-          AWS_EC2_METADATA_DISABLED: "true"
-        run: |
-          : "${AWS_DEFAULT_REGION:=auto}"
-
-          SRC="analytics/artifacts/gx"
-          if [ ! -f "${SRC}/index.html" ]; then
-            echo "GX docs not generated this run (ok)."
-            exit 0
-          fi
-
-          R2_ENDPOINT="${R2_ENDPOINT}"
-          BUCKET="s3://${R2_BUCKET}"
-          LATEST_PREFIX="gx/latest"
-
-          aws s3 sync "${SRC}" "${BUCKET}/${LATEST_PREFIX}" \
-            --endpoint-url "${R2_ENDPOINT}" \
-            --cache-control "no-cache" \
-            --delete
+      - run: echo "Disabled: replaced by analytics_pipeline.yml"
