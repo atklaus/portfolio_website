@@ -72,7 +72,7 @@ jobs:
         continue-on-error: true
         run: |
           cd analytics/dbt
-          edr report --project-dir . --profiles-dir . --output-path ../artifacts/elementary || \
+          edr report --project-dir . --profiles-dir . --target-path ../artifacts/elementary || \
             echo "Elementary report generation failed (ok)."
       - name: Upload Elementary report to R2
         env:
