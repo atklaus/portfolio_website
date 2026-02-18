@@ -26,6 +26,12 @@
   {% set safe_token = token | replace("'", "''") %}
 
   {% if execute %}
+    {% set existing = run_query("select 1 from duckdb_databases() where database_name = 'r2_iceberg' limit 1") %}
+    {% if existing and existing.rows and (existing.rows | length) > 0 %}
+      {{ log("r2_iceberg already attached on this connection; skipping attach.", info=True) }}
+      {{ return("select 1") }}
+    {% endif %}
+
     {% do run_query("INSTALL httpfs") %}
     {% do run_query("LOAD httpfs") %}
 

@@ -17,6 +17,8 @@ clean-targets:
 models:
   portfolio_analytics:
     +materialized: table
+    +pre-hook:
+      - "{{ attach_r2_iceberg_if_needed() }}"
     staging:
       +materialized: table
     marts:
