@@ -42,10 +42,12 @@ def connect_iceberg():
     r2_endpoint = _get_secret("R2_ENDPOINT")
     if r2_endpoint:
         r2_endpoint = r2_endpoint.strip()
-        if not r2_endpoint.startswith(("http://", "https://")):
-            r2_endpoint = "https://" + r2_endpoint.lstrip("/")
     else:
-        r2_endpoint = f"https://{account_id}.r2.cloudflarestorage.com"
+        r2_endpoint = f"{account_id}.r2.cloudflarestorage.com"
+
+    # DuckDB expects the endpoint without scheme.
+    r2_endpoint = r2_endpoint.replace("https://", "").replace("http://", "")
+    r2_endpoint = r2_endpoint.lstrip("/").rstrip("/")
 
     catalog_uri = _require_secret("R2_ICEBERG_CATALOG_URI")
     warehouse = _require_secret("R2_ICEBERG_WAREHOUSE")
@@ -70,6 +72,7 @@ def connect_iceberg():
     # Make sure DuckDB httpfs uses the same endpoint and path-style URLs for R2
     con.execute("SET s3_endpoint=?", [r2_endpoint])
     con.execute("SET s3_region='auto'")
+    con.execute("SET s3_use_ssl=true")
 
     # Make reruns idempotent
     con.execute("DROP SECRET IF EXISTS r2_s3")
