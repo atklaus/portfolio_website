@@ -25,7 +25,6 @@ jobs:
       R2_ICEBERG_WAREHOUSE: ${{ secrets.R2_ICEBERG_WAREHOUSE }}
       R2_ICEBERG_TOKEN: ${{ secrets.R2_ICEBERG_TOKEN }}
       DBT_DUCKDB_PATH: ${{ github.workspace }}/analytics/artifacts/warehouse.duckdb
-      DRY_RUN: ${{ github.event_name == 'push' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -46,7 +45,6 @@ jobs:
           mkdir -p analytics/artifacts
           echo "DBT_DUCKDB_PATH=${DBT_DUCKDB_PATH}"
       - name: Build telemetry parquet (optional)
-        if: env.DRY_RUN != 'true'
         run: |
           if [ -f analytics/pipelines/build_events_parquet.py ]; then
             poetry run python analytics/pipelines/build_events_parquet.py --days-back 2
@@ -54,7 +52,6 @@ jobs:
             echo "analytics/pipelines/build_events_parquet.py not found; skipping."
           fi
       - name: Load telemetry into Iceberg
-        if: env.DRY_RUN != 'true'
         run: |
           poetry run python scripts/load_telemetry_to_iceberg.py
       - name: Build dbt models + docs
@@ -72,7 +69,7 @@ jobs:
           test -f "${SRC}/catalog.json"
           echo "DBT_ARTIFACTS_READY=true" >> "$GITHUB_ENV"
       - name: Upload dbt docs to R2 public bucket
-        if: env.DRY_RUN != 'true' && env.DBT_ARTIFACTS_READY == 'true'
+        if: env.DBT_ARTIFACTS_READY == 'true'
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
@@ -93,7 +90,6 @@ jobs:
         run: |
           poetry run python scripts/run_gx.py || true
       - name: Upload GX docs to R2 public bucket (if present)
-        if: env.DRY_RUN != 'true'
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
