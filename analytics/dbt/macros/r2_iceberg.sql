@@ -28,12 +28,22 @@
   {% if execute %}
     {% do run_query("INSTALL httpfs") %}
     {% do run_query("LOAD httpfs") %}
-    {% do run_query("INSTALL iceberg") %}
+
+    {# Iceberg: force a modern extension bundle (CI commonly lags otherwise) #}
+    {% do run_query("FORCE INSTALL iceberg FROM core_nightly") %}
     {% do run_query("LOAD iceberg") %}
-    {% do run_query("DROP SECRET IF EXISTS r2_iceberg_secret") %}
-    {% do run_query("CREATE SECRET r2_iceberg_secret (TYPE ICEBERG, TOKEN '" ~ safe_token ~ "')") %}
+
+    {# Debug: confirm extension is actually loaded #}
+    {% set ext = run_query("select extension_name, installed, loaded from duckdb_extensions() where extension_name in ('iceberg','httpfs')") %}
+    {% if ext %}
+      {{ log(ext.table | string, info=True) }}
+    {% endif %}
+
+    {# Secret provider is registered by the iceberg extension; this is where you were failing #}
+    {% do run_query("CREATE OR REPLACE SECRET r2_iceberg_secret (TYPE iceberg, TOKEN '" ~ safe_token ~ "')") %}
+
     {% do run_query("DETACH DATABASE IF EXISTS r2_iceberg") %}
-    {% do run_query("ATTACH '" ~ safe_warehouse ~ "' AS r2_iceberg (TYPE ICEBERG, ENDPOINT '" ~ safe_catalog_uri ~ "', SECRET r2_iceberg_secret)") %}
+    {% do run_query("ATTACH '" ~ safe_warehouse ~ "' AS r2_iceberg (TYPE iceberg, ENDPOINT '" ~ safe_catalog_uri ~ "', SECRET r2_iceberg_secret)") %}
 
     {% set dbs = run_query("select database_name from duckdb_databases()") %}
     {% if dbs %}
@@ -42,15 +52,4 @@
   {% endif %}
 
   {{ return("select 1") }}
-{% endmacro %}
-
-{% macro debug_duckdb_databases() %}
-  {% set query = "select * from duckdb_databases()" %}
-  {% if execute %}
-    {% set results = run_query(query) %}
-    {% if results %}
-      {{ log(results.table | string, info=True) }}
-    {% endif %}
-  {% endif %}
-  {{ return(query) }}
 {% endmacro %}
