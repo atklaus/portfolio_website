@@ -121,7 +121,8 @@ def _bullet_list(items: list[str]) -> None:
 with page_guard(os.path.basename(__file__)):
     header.page_header("Analytics Ops", page_name=os.path.basename(__file__))
 
-    st.markdown("dbt docs + lineage for this site")
+    st.markdown("")
+    st.markdown("dbt docs + lineage powering this site")
 
     docs_base_url = _get_docs_base_url()
     manifest_url = f"{docs_base_url}/manifest.json"
@@ -179,7 +180,7 @@ with page_guard(os.path.basename(__file__)):
         c3.metric("Total exec time (s)", f"{total_exec_time:.2f}")
         c4.metric("Failures/Errors", str(failures))
 
-    models_tab, docs_tab, quality_tab = st.tabs(["Models", "Docs", "Quality"])
+    models_tab, docs_tab, quality_tab = st.tabs(["Models", "Docs", "Obervability (experimental)"])
 
     with models_tab:
         st.subheader("Models")
@@ -260,7 +261,7 @@ with page_guard(os.path.basename(__file__)):
         components.iframe(f"{docs_base_url}/index.html", height=1000, scrolling=True)
 
     with quality_tab:
-        st.subheader("Quality")
+        st.subheader("Observability / Data Quality")
         elementary_base = _get_elementary_base_url()
         if not elementary_base:
             st.write("Elementary not configured yet. Set ELEMENTARY_BASE_URL to the hosted report base URL.")

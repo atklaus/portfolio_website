@@ -5,3 +5,11 @@ portfolio_analytics:
       type: duckdb
       path: ../artifacts/warehouse.duckdb
       threads: 4
+
+elementary:
+  target: local
+  outputs:
+    local:
+      type: duckdb
+      path: ../artifacts/warehouse.duckdb
+      threads: 4
