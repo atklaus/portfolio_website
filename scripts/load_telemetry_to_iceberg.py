@@ -147,16 +147,54 @@ def _split_table_name(table: str) -> tuple[str, str, str]:
 
 def _table_exists(con, table: str) -> bool:
     catalog, schema, name = _split_table_name(table)
-    row = con.execute(
-        """
-        SELECT 1
-        FROM r2_iceberg.information_schema.tables
-        WHERE table_catalog = ? AND table_schema = ? AND table_name = ?
-        LIMIT 1
-        """,
-        [catalog, schema, name],
-    ).fetchone()
-    return row is not None
+    dotted_schema = f"{catalog}.{schema}"
+
+    checks: list[tuple[str, list[str]]] = [
+        (
+            """
+            SELECT 1
+            FROM duckdb_tables()
+            WHERE table_name = ?
+              AND (
+                (database_name = ? AND schema_name = ?)
+                OR schema_name = ?
+              )
+            LIMIT 1
+            """,
+            [name, catalog, schema, dotted_schema],
+        ),
+        (
+            """
+            SELECT 1
+            FROM information_schema.tables
+            WHERE table_name = ?
+              AND (
+                (table_catalog = ? AND table_schema = ?)
+                OR table_schema = ?
+              )
+            LIMIT 1
+            """,
+            [name, catalog, schema, dotted_schema],
+        ),
+        (
+            """
+            SELECT 1
+            FROM information_schema.tables
+            WHERE table_name = ? AND table_schema = ?
+            LIMIT 1
+            """,
+            [name, schema],
+        ),
+    ]
+
+    for sql, params in checks:
+        try:
+            row = con.execute(sql, params).fetchone()
+            if row is not None:
+                return True
+        except Exception:
+            continue
+    return False
 
 
 def _normalize_iceberg_type(type_name: str) -> str:
