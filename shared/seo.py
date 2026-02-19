@@ -8,8 +8,21 @@ from shared.pages import get_page_by_file, get_pages, page_url
 from shared.settings import get_settings
 
 
+def _absolute_url(base_url: str, value: str) -> str:
+    raw = (value or "").strip()
+    if not raw:
+        return ""
+    if raw.startswith("http://") or raw.startswith("https://"):
+        return raw
+    base = base_url.rstrip("/")
+    if raw.startswith("/"):
+        return f"{base}{raw}"
+    return f"{base}/{raw}"
+
+
 def apply_page_meta(page_name: str) -> None:
     settings = get_settings()
+    image_url = _absolute_url(settings.site_url, settings.social_image_url)
     page = get_page_by_file(page_name)
     if page is None:
         title = settings.app_name
@@ -19,7 +32,7 @@ def apply_page_meta(page_name: str) -> None:
         title = settings.app_name if page.key == "home" else f"{page.title} | {settings.app_name}"
         description = page.description
         url = page_url(page, settings.site_url)
-    inject_social_meta(title=title, description=description, url=url)
+    inject_social_meta(title=title, description=description, url=url, image_url=image_url)
 
 
 def _sitemap_xml() -> str:

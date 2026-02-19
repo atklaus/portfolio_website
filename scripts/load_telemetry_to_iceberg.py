@@ -54,6 +54,10 @@ def _has_parquet_files(con, glob: str) -> bool:
         raise
 
 
+def _has_any_parquet_files(con, globs: tuple[str, ...]) -> bool:
+    return any(_has_parquet_files(con, glob) for glob in globs)
+
+
 def _list_parquet_objects(prefix: str) -> list[tuple[str, str, int, dt.datetime | None]]:
     """Return object metadata for parquet files under an S3/R2 prefix.
 
@@ -77,6 +81,13 @@ def _list_parquet_objects(prefix: str) -> list[tuple[str, str, int, dt.datetime 
             size = int(item.get("Size") or 0)
             rows.append((f"s3://{bucket}/{key}", etag, size, last_modified))
 
+    return rows
+
+
+def _list_parquet_objects_many(prefixes: tuple[str, ...]) -> list[tuple[str, str, int, dt.datetime | None]]:
+    rows: list[tuple[str, str, int, dt.datetime | None]] = []
+    for prefix in prefixes:
+        rows.extend(_list_parquet_objects(prefix))
     return rows
 
 
@@ -226,11 +237,13 @@ def _normalize_iceberg_type(type_name: str) -> str:
     return "VARCHAR"
 
 
-def _staged_schema_sql(glob: str) -> str:
-    glob_literal = _sql_escape(glob)
+def _staged_schema_sql(globs: tuple[str, ...]) -> str:
+    if not globs:
+        raise RuntimeError("Expected at least one parquet glob.")
+    glob_list_sql = ", ".join(f"'{_sql_escape(glob)}'" for glob in globs)
     return (
         "SELECT * EXCLUDE (filename), filename AS source_file, now() AS ingested_at "
-        f"FROM read_parquet('{glob_literal}', "
+        f"FROM read_parquet([{glob_list_sql}], "
         "hive_partitioning=true, filename=true, union_by_name=true)"
     )
 
@@ -244,8 +257,8 @@ def _safe_temp_name(base: str, dataset: str) -> str:
 class DatasetSpec:
     dataset: str
     table: str
-    glob: str
-    prefix: str
+    globs: tuple[str, ...]
+    prefixes: tuple[str, ...]
 
 
 def _ensure_schemas(con) -> None:
@@ -265,13 +278,13 @@ def _ensure_schemas(con) -> None:
     )
 
 
-def _create_raw_table(con, table: str, glob: str) -> None:
+def _create_raw_table(con, table: str, globs: tuple[str, ...]) -> None:
     if _table_exists(con, table):
         return
 
-    schema_rows = con.execute(f"DESCRIBE {_staged_schema_sql(glob)} LIMIT 0").fetchall()
+    schema_rows = con.execute(f"DESCRIBE {_staged_schema_sql(globs)} LIMIT 0").fetchall()
     if not schema_rows:
-        raise RuntimeError(f"Unable to infer staged schema for {table} from {glob}")
+        raise RuntimeError(f"Unable to infer staged schema for {table} from globs={globs}")
 
     seen: set[str] = set()
     column_defs: list[str] = []
@@ -299,11 +312,11 @@ def _load_dataset(con, spec: DatasetSpec) -> dict[str, Any]:
     con.execute(
         f"""
         CREATE OR REPLACE TEMP VIEW {staged_rows_view} AS
-        {_staged_schema_sql(spec.glob)}
+        {_staged_schema_sql(spec.globs)}
         """
     )
 
-    meta_rows = _list_parquet_objects(spec.prefix)
+    meta_rows = _list_parquet_objects_many(spec.prefixes)
     if not meta_rows:
         return {
             "dataset": spec.dataset,
@@ -402,32 +415,50 @@ def _load_dataset(con, spec: DatasetSpec) -> dict[str, Any]:
 def main() -> None:
     bucket = _require_env("R2_BUCKET")
 
-    events_prefix = _get_env("TELEMETRY_EVENTS_PARQUET_PREFIX", "telemetry/events_parquet/")
-    sessions_prefix = _get_env("TELEMETRY_SESSIONS_PARQUET_PREFIX", "telemetry/sessions/")
+    def _parse_prefixes(var_name: str, default_prefixes: tuple[str, ...]) -> tuple[str, ...]:
+        raw = _get_env(var_name, "")
+        if not raw:
+            return default_prefixes
+        prefixes = tuple(part.strip() for part in raw.split(",") if part.strip())
+        return prefixes or default_prefixes
 
-    events_glob = f"s3://{bucket}/{events_prefix}date=*/**/*.parquet"
-    sessions_glob = f"s3://{bucket}/{sessions_prefix}date=*/**/*.parquet"
+    events_prefixes = _parse_prefixes(
+        "TELEMETRY_EVENTS_PARQUET_PREFIXES",
+        (_get_env("TELEMETRY_EVENTS_PARQUET_PREFIX", "telemetry/events_parquet/"),),
+    )
+    sessions_prefixes = _parse_prefixes(
+        "TELEMETRY_SESSIONS_PARQUET_PREFIXES",
+        (
+            _get_env("TELEMETRY_SESSIONS_PARQUET_PREFIX", "telemetry/sessions/"),
+            "telemetry/sessions_parquet/",
+        ),
+    )
+
+    events_globs = tuple(f"s3://{bucket}/{prefix}date=*/**/*.parquet" for prefix in events_prefixes)
+    sessions_globs = tuple(f"s3://{bucket}/{prefix}date=*/**/*.parquet" for prefix in sessions_prefixes)
 
     con = connect_iceberg()
 
     import duckdb
 
     print(f"duckdb_version={duckdb.__version__}")
+    print(f"events_prefixes={events_prefixes}")
+    print(f"sessions_prefixes={sessions_prefixes}")
 
     _ensure_schemas(con)
 
     events_spec = DatasetSpec(
         dataset="website_events",
         table="r2_iceberg.raw.website_events",
-        glob=events_glob,
-        prefix=f"{events_prefix}",
+        globs=events_globs,
+        prefixes=events_prefixes,
     )
 
-    if not _has_parquet_files(con, events_spec.glob):
+    if not _has_any_parquet_files(con, events_spec.globs):
         print("No event parquet files found; exiting.")
         return
 
-    _create_raw_table(con, events_spec.table, events_spec.glob)
+    _create_raw_table(con, events_spec.table, events_spec.globs)
     events_result = _load_dataset(con, events_spec)
     print(
         "events_load "
@@ -438,14 +469,14 @@ def main() -> None:
     )
 
     sessions_result = None
-    if _has_parquet_files(con, sessions_glob):
+    if _has_any_parquet_files(con, sessions_globs):
         sessions_spec = DatasetSpec(
             dataset="website_sessions",
             table="r2_iceberg.raw.website_sessions",
-            glob=sessions_glob,
-            prefix=f"{sessions_prefix}",
+            globs=sessions_globs,
+            prefixes=sessions_prefixes,
         )
-        _create_raw_table(con, sessions_spec.table, sessions_spec.glob)
+        _create_raw_table(con, sessions_spec.table, sessions_spec.globs)
         sessions_result = _load_dataset(con, sessions_spec)
         print(
             "sessions_load "

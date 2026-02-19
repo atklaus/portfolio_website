@@ -2,8 +2,27 @@ version: 2
 
 sources:
   - name: raw
+    description: >
+      Iceberg raw telemetry tables populated by `scripts/load_telemetry_to_iceberg.py`.
+      dbt reads from Iceberg tables; path-level R2 prefix selection is handled by the loader.
     database: r2_iceberg
     schema: raw
     tables:
       - name: website_events
+        description: >
+          Event telemetry loaded from parquet landing-zone objects under
+          `telemetry/events_parquet/` (configurable via `TELEMETRY_EVENTS_PARQUET_PREFIX*`).
+          Runtime append-only JSONL in `telemetry/events/` is transformed upstream and is
+          intentionally not read directly by dbt sources.
+        meta:
+          r2_prefixes:
+            - telemetry/events_parquet/
       - name: website_sessions
+        description: >
+          Session snapshot telemetry loaded from parquet objects under
+          `telemetry/sessions/` with backward-compatible support for legacy
+          `telemetry/sessions_parquet/` during migration windows.
+        meta:
+          r2_prefixes:
+            - telemetry/sessions/
+            - telemetry/sessions_parquet/

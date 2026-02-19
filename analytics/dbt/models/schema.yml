@@ -108,3 +108,57 @@ models:
         description: Number of deduped submissions that day.
       - name: unique_visitors_count
         description: Distinct visitor_ids with submissions that day.
+
+  - name: fct_sessions_daily
+    description: >
+      Daily session counts with session snapshots as the primary source.
+      `sessions` uses snapshots when available per day, with event-derived fallback for historical continuity.
+    columns:
+      - name: date
+        description: UTC date.
+        data_tests:
+          - not_null
+          - unique
+      - name: sessions
+        description: Final daily active sessions metric used by dashboards.
+      - name: active_sessions_from_snapshots
+        description: Distinct sessions derived from `stg_website_sessions`.
+      - name: active_sessions_from_events
+        description: Distinct sessions derived from `stg_website_events`.
+      - name: sessions_source
+        description: Source used for the `sessions` value (`session_snapshots`, `events`, `none`).
+
+  - name: fct_sessions_daily_comparison
+    description: >
+      Daily comparison of sessions derived from snapshot files vs event telemetry.
+      Use this model to validate parity after ingestion/path changes.
+    columns:
+      - name: date
+        description: UTC date.
+        data_tests:
+          - not_null
+          - unique
+      - name: active_sessions_from_snapshots
+        description: Distinct sessions from snapshot telemetry.
+      - name: active_sessions_from_events
+        description: Distinct sessions from event telemetry.
+      - name: sessions_delta
+        description: Snapshot sessions minus event sessions.
+      - name: pct_delta_vs_events
+        description: Percent delta relative to event-derived sessions.
+
+  - name: dbg_telemetry_source_latest_files
+    description: >
+      Debug model listing the latest 20 source objects per dataset currently present
+      in staging, including row counts and max timestamps.
+    columns:
+      - name: dataset
+        description: Dataset name (`website_events` or `website_sessions`).
+      - name: source_file
+        description: Backing parquet object URL seen by dbt staging.
+      - name: row_count
+        description: Number of staging rows from this source file.
+      - name: max_occurred_at
+        description: Max event/snapshot timestamp represented by this source file.
+      - name: max_ingested_at
+        description: Max ingestion timestamp represented by this source file.

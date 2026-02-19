@@ -70,10 +70,56 @@ with source_sessions as (
     source_file,
     cast(ingested_at as timestamp) as ingested_at
   from {{ source('raw', 'website_sessions') }}
+),
+normalized as (
+  select
+    ts_utc,
+    coalesce(date, cast(ts_utc as date)) as date,
+    session_id,
+    visitor_id,
+    pages_visited,
+    event_count,
+    error_count,
+    total_runtime_ms,
+    app_version,
+    last_page,
+    coalesce(
+      nullif(trim(page_slug), ''),
+      case
+        when nullif(trim(last_page), '') is null then null
+        else lower(
+          regexp_replace(
+            regexp_replace(
+              regexp_replace(trim(last_page), '^.*/', ''),
+              '^\\d+_',
+              ''
+            ),
+            '\\.py$',
+            ''
+          )
+        )
+      end
+    ) as page_slug,
+    coalesce(started_at, ts_utc) as started_at,
+    coalesce(ended_at, ts_utc) as ended_at,
+    ts_utc as snapshot_at,
+    source_file,
+    ingested_at,
+    cast(ingested_at as date) as ingestion_date
+  from source_sessions
+),
+ranked as (
+  select
+    *,
+    row_number() over (
+      partition by coalesce(nullif(trim(session_id), ''), '__missing_session__'), snapshot_at
+      order by ingested_at desc nulls last, source_file desc
+    ) as dedupe_rank
+  from normalized
 )
 select
   ts_utc,
-  coalesce(date, cast(ts_utc as date)) as date,
+  date,
   session_id,
   visitor_id,
   pages_visited,
@@ -82,28 +128,13 @@ select
   total_runtime_ms,
   app_version,
   last_page,
-  coalesce(
-    nullif(trim(page_slug), ''),
-    case
-      when nullif(trim(last_page), '') is null then null
-      else lower(
-        regexp_replace(
-          regexp_replace(
-            regexp_replace(trim(last_page), '^.*/', ''),
-            '^\\d+_',
-            ''
-          ),
-          '\\.py$',
-          ''
-        )
-      )
-    end
-  ) as page_slug,
-  coalesce(started_at, ts_utc) as started_at,
-  coalesce(ended_at, ts_utc) as ended_at,
-  ts_utc as snapshot_at,
+  page_slug,
+  started_at,
+  ended_at,
+  snapshot_at,
   source_file,
   ingested_at,
-  cast(ingested_at as date) as ingestion_date
-from source_sessions
+  ingestion_date
+from ranked
+where dedupe_rank = 1
 {% endif %}

@@ -47,3 +47,30 @@ select
 from r2_iceberg.analytics.telemetry_submission_daily
 order by date desc, page_slug;
 ```
+
+## Sessions lineage
+
+`fct_sessions_daily` now exposes both lineage paths:
+
+- `active_sessions_from_snapshots` (from `stg_website_sessions`)
+- `active_sessions_from_events` (from `stg_website_events`)
+- `sessions` (snapshot-first with event fallback)
+- `sessions_source` (`session_snapshots` or `events`)
+
+Parity check model:
+
+```sql
+select *
+from r2_iceberg.analytics.fct_sessions_daily_comparison
+order by date desc
+limit 30;
+```
+
+Latest source objects seen by staging:
+
+```sql
+select *
+from r2_iceberg.analytics.dbg_telemetry_source_latest_files
+order by dataset, max_ingested_at desc
+limit 40;
+```

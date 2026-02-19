@@ -113,7 +113,7 @@ Yes for `wnba_success`.
   - Includes `session_id`, `visitor_id`, timestamp, and structured submission payload (`payload.fields`, `payload.submission_id`, etc.).
 
 What was missing/unclear before this pass:
-- Session snapshots were written to `telemetry/sessions/...` but the Iceberg loader default expected `telemetry/sessions_parquet/...`, so downstream session tables could appear empty even when runtime snapshots existed.
+- Session snapshot lineage needed explicit prefix documentation and backward-compatible loader defaults.
 - Submission payload structure was previously less query-friendly; now it is explicit and page-config driven.
 
 ## Phase 2: Design Choice

@@ -1,41 +1,62 @@
 from __future__ import annotations
 
-import html
+import json
 
 import streamlit.components.v1 as components
 
 
-def inject_social_meta(title: str, description: str, url: str | None = None) -> None:
-    safe_title = html.escape(title or "")
-    safe_desc = html.escape(description or "")
-    safe_url = html.escape(url or "")
+def inject_social_meta(
+    title: str,
+    description: str,
+    url: str | None = None,
+    image_url: str | None = None,
+    og_type: str = "website",
+) -> None:
+    safe_title = title or ""
+    safe_desc = description or ""
+    safe_url = url or ""
+    safe_image_url = image_url or ""
+    safe_og_type = og_type or "website"
+    twitter_card = "summary_large_image" if safe_image_url else "summary"
 
     script = f"""
     <script>
       (function() {{
-        const title = '{safe_title}';
+        const title = {json.dumps(safe_title)};
+        const targetDocument = (() => {{
+          try {{
+            if (window.parent && window.parent.document) {{
+              return window.parent.document;
+            }}
+          }} catch (err) {{}}
+          return document;
+        }})();
         if (title) {{
-          document.title = title;
+          targetDocument.title = title;
         }}
-        const head = document.head || document.getElementsByTagName('head')[0];
+        const head = targetDocument.head || targetDocument.getElementsByTagName('head')[0];
+        if (!head) return;
         const ensure = (attr, name, content) => {{
           if (!content) return;
           const selector = attr === 'name' ? `meta[name='${{name}}']` : `meta[property='${{name}}']`;
-          let tag = document.querySelector(selector);
+          let tag = targetDocument.querySelector(selector);
           if (!tag) {{
-            tag = document.createElement('meta');
+            tag = targetDocument.createElement('meta');
             tag.setAttribute(attr, name);
             head.appendChild(tag);
           }}
           tag.setAttribute('content', content);
         }};
 
-        ensure('property', 'og:title', '{safe_title}');
-        ensure('property', 'og:description', '{safe_desc}');
-        ensure('property', 'og:url', '{safe_url}');
-        ensure('name', 'twitter:card', 'summary');
-        ensure('name', 'twitter:title', '{safe_title}');
-        ensure('name', 'twitter:description', '{safe_desc}');
+        ensure('property', 'og:title', {json.dumps(safe_title)});
+        ensure('property', 'og:description', {json.dumps(safe_desc)});
+        ensure('property', 'og:type', {json.dumps(safe_og_type)});
+        ensure('property', 'og:url', {json.dumps(safe_url)});
+        ensure('property', 'og:image', {json.dumps(safe_image_url)});
+        ensure('name', 'twitter:card', {json.dumps(twitter_card)});
+        ensure('name', 'twitter:title', {json.dumps(safe_title)});
+        ensure('name', 'twitter:description', {json.dumps(safe_desc)});
+        ensure('name', 'twitter:image', {json.dumps(safe_image_url)});
       }})();
     </script>
     """
