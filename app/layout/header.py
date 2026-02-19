@@ -47,7 +47,7 @@ COLOR = "black"
 def set_page_container_style(
     max_width: int = 1100,
     max_width_100_percent: bool = False,
-    padding_top: float = 0.25,
+    padding_top: float = 1,
     padding_right: int = 10,
     padding_left: int = 1,
     padding_bottom: float = 0.25,
@@ -211,7 +211,7 @@ def page_header(title, page_name, container_style=True):
     if container_style:
         set_page_container_style(
             max_width_100_percent=True,
-            padding_top=0.25,
+            padding_top=1,
             padding_bottom=0.25,
             padding_left=1.25,
             padding_right=1.25,

@@ -63,7 +63,7 @@ def _mod_lookup() -> dict[str, dict]:
 
 def _parse_page(path: Path, mods: dict[str, dict]) -> tuple[int, str, PageDef]:
     stem = path.stem
-    match = re.match(r"^(?P<num>\\d+)_?(?P<slug>.+)$", stem)
+    match = re.match(r"^(?P<num>\d+)_?(?P<slug>.+)$", stem)
     if match:
         order = int(match.group("num"))
         slug = match.group("slug")
@@ -83,8 +83,10 @@ def _parse_page(path: Path, mods: dict[str, dict]) -> tuple[int, str, PageDef]:
     override = _OVERRIDES.get(slug, {})
     key = override.get("key", slug)
     include_in_nav = bool(override.get("include_in_nav", True))
+    include_in_sitemap = bool(override.get("include_in_sitemap", True))
     if mod and isinstance(mod, dict) and mod.get("enabled") is False:
         include_in_nav = False
+        include_in_sitemap = False
     page = PageDef(
         key=str(key),
         file=str(Path("pages") / path.name),
@@ -93,7 +95,7 @@ def _parse_page(path: Path, mods: dict[str, dict]) -> tuple[int, str, PageDef]:
         icon=str(override.get("icon", icon)),
         description=str(override.get("description", description)),
         include_in_nav=include_in_nav,
-        include_in_sitemap=bool(override.get("include_in_sitemap", True)),
+        include_in_sitemap=include_in_sitemap,
     )
     return order, slug, page
 
@@ -121,4 +123,8 @@ def page_url(page: PageDef, base_url: str) -> str:
     base = base_url.rstrip("/")
     if page.key == "home":
         return f"{base}/"
-    return f"{base}/{quote(page.url_path)}"
+    raw = page.url_path.strip()
+    if raw in {"", "/"}:
+        return f"{base}/"
+    path = raw if raw.startswith("/") else f"/{raw}"
+    return f"{base}{quote(path)}"

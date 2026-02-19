@@ -190,3 +190,4 @@ analytics/artifacts/
 *.wmv
 analytics/.env.iceberg
 .env.iceberg
+workers/public_r2/.wrangler/cache/wrangler-account.json

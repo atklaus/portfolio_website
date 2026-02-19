@@ -8,6 +8,7 @@ Verification:
 ```bash
 curl -I https://databuilds.dev/sitemap.xml
 curl -I https://databuilds.dev/robots.txt
+curl https://databuilds.dev/sitemap.xml | head
 ```
 
 Expected:
@@ -15,3 +16,9 @@ Expected:
 - `200 OK`
 - `Content-Type: application/xml; charset=utf-8` for `sitemap.xml`
 - `Content-Type: text/plain; charset=utf-8` for `robots.txt`
+
+Local validation:
+
+```bash
+python scripts/validate_sitemap.py
+```
