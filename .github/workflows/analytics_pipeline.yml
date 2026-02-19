@@ -20,6 +20,7 @@ jobs:
       R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
       R2_REGION: ${{ secrets.R2_REGION }}
       R2_BUCKET: ${{ secrets.R2_BUCKET }}
+      R2_PUBLIC_BUCKET: ${{ secrets.R2_PUBLIC_BUCKET }}
       R2_ICEBERG_CATALOG_URI: ${{ secrets.R2_ICEBERG_CATALOG_URI }}
       R2_ICEBERG_WAREHOUSE: ${{ secrets.R2_ICEBERG_WAREHOUSE }}
       R2_ICEBERG_TOKEN: ${{ secrets.R2_ICEBERG_TOKEN }}
@@ -78,7 +79,7 @@ jobs:
           : "${AWS_DEFAULT_REGION:=auto}"
 
           SRC="analytics/artifacts/dbt"
-          BUCKET="s3://${R2_BUCKET}"
+          BUCKET="s3://${R2_PUBLIC_BUCKET}"
           LATEST_PREFIX="dbt_docs/latest"
 
           poetry run aws s3 sync "${SRC}" "${BUCKET}/${LATEST_PREFIX}" \
@@ -103,7 +104,7 @@ jobs:
             exit 0
           fi
 
-          BUCKET="s3://${R2_BUCKET}"
+          BUCKET="s3://${R2_PUBLIC_BUCKET}"
           LATEST_PREFIX="gx/latest"
 
           poetry run aws s3 sync "${SRC}" "${BUCKET}/${LATEST_PREFIX}" \
