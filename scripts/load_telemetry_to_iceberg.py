@@ -80,20 +80,53 @@ def _list_parquet_objects(prefix: str) -> list[tuple[str, str, int, dt.datetime 
     return rows
 
 
-def _ensure_table_columns(con, table: str, view: str) -> None:
-    """Add missing columns to `table` based on `view` schema."""
-    table_cols = {
-        row[1]: row[2]
-        for row in con.execute(f"PRAGMA table_info('{table}')").fetchall()
-    }
+def _quote_ident(value: str) -> str:
+    return '"' + value.replace('"', '""') + '"'
 
-    view_desc = con.execute(f"DESCRIBE SELECT * FROM {view}").fetchall()
-    view_cols = [(row[0], row[1]) for row in view_desc]
 
-    for col_name, col_type in view_cols:
-        if col_name in table_cols:
-            continue
-        con.execute(f'ALTER TABLE {table} ADD COLUMN "{col_name}" {col_type}')
+def _table_columns(con, table: str) -> list[str]:
+    return [str(row[1]) for row in con.execute(f"PRAGMA table_info('{table}')").fetchall()]
+
+
+def _view_columns(con, view: str) -> list[str]:
+    return [str(row[0]) for row in con.execute(f"DESCRIBE SELECT * FROM {view}").fetchall()]
+
+
+def _insert_compatible_rows(con, table: str, view: str) -> None:
+    """Insert rows using only the intersection of table/view columns.
+
+    Iceberg table evolution via ALTER TABLE ADD COLUMN is not consistently available
+    across DuckDB versions/catalog integrations. This keeps ingestion resilient when
+    staged parquet adds new columns.
+    """
+    table_cols = _table_columns(con, table)
+    staged_cols = _view_columns(con, view)
+    staged_set = set(staged_cols)
+    insert_cols = [col for col in table_cols if col in staged_set]
+
+    if not insert_cols:
+        raise RuntimeError(
+            f"No compatible columns found for insert into {table}; "
+            f"table_cols={table_cols}, staged_cols={staged_cols}"
+        )
+
+    dropped_staged_cols = [col for col in staged_cols if col not in set(table_cols)]
+    if dropped_staged_cols:
+        print(
+            f"{table}: staged columns not present in target schema; "
+            f"skipping {len(dropped_staged_cols)} column(s): {dropped_staged_cols}"
+        )
+
+    insert_cols_sql = ", ".join(_quote_ident(col) for col in insert_cols)
+    select_cols_sql = ", ".join(f"s.{_quote_ident(col)}" for col in insert_cols)
+    con.execute(
+        f"""
+        INSERT INTO {table} ({insert_cols_sql})
+        SELECT {select_cols_sql}
+        FROM {view} s
+        INNER JOIN new_files nf ON nf.source_file = s.source_file
+        """
+    )
 
 
 @dataclass(frozen=True)
@@ -231,16 +264,7 @@ def _load_dataset(con, spec: DatasetSpec) -> dict[str, Any]:
     ).fetchone()[0]
 
     if file_count:
-        _ensure_table_columns(con, spec.table, "staged_rows")
-
-        con.execute(
-            f"""
-            INSERT INTO {spec.table} BY NAME
-            SELECT s.*
-            FROM staged_rows s
-            INNER JOIN new_files nf ON nf.source_file = s.source_file
-            """
-        )
+        _insert_compatible_rows(con, spec.table, "staged_rows")
 
         con.execute(
             """

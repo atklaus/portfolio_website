@@ -123,14 +123,34 @@ def _value_or_none(df, column: str):
     if df is None or df.empty or column not in df.columns:
         return None
     value = df.iloc[0][column]
+    if _is_nullish(value):
+        return None
+    return value
+
+
+def _is_nullish(value: Any) -> bool:
     if value is None:
+        return True
+    if isinstance(value, str) and value.strip() == "":
+        return True
+    try:
+        import pandas as pd
+
+        return bool(pd.isna(value))
+    except Exception:
+        return False
+
+
+def _to_int_or_none(value: Any) -> int | None:
+    if _is_nullish(value):
         return None
     try:
-        if value != value:
-            return None
+        return int(value)
     except Exception:
-        pass
-    return value
+        try:
+            return int(float(value))
+        except Exception:
+            return None
 
 
 def _sessions_pipeline_debug_panel() -> None:
@@ -156,26 +176,49 @@ def _sessions_pipeline_debug_panel() -> None:
         st.dataframe(raw_presence_df, use_container_width=True, hide_index=True)
 
     def _table_ref(table_catalog: str, table_schema: str, table_name: str) -> str:
-        # Handle dbt-local quoted schemas (e.g., "r2_iceberg.raw") and attached catalogs.
-        if "." in table_schema:
-            return f'"{table_schema}".{table_name}'
+        # Prefer catalog-qualified references to avoid ambiguity across DuckDB catalog modes.
         if table_catalog and table_catalog not in {"warehouse", "main", "temp", "system"}:
             return f"{table_catalog}.{table_schema}.{table_name}"
+        # Handle dbt-local quoted schemas (e.g., "r2_iceberg.raw") when catalog is implicit.
+        if "." in table_schema:
+            return f'"{table_schema}".{table_name}'
         return f"{table_schema}.{table_name}"
+
+    def _raw_ref_priority(table_catalog: str, table_schema: str) -> int:
+        # Highest confidence: explicit attached Iceberg catalog/schema.
+        if table_catalog == "r2_iceberg" and table_schema == "raw":
+            return 3
+        # Next best: any explicit non-default catalog.
+        if table_catalog and table_catalog not in {"warehouse", "main", "temp", "system"}:
+            return 2
+        # Last: dotted pseudo-schema in local catalog.
+        if "." in table_schema:
+            return 1
+        return 0
 
     raw_events_ref = None
     raw_sessions_ref = None
+    raw_events_priority = -1
+    raw_sessions_priority = -1
     if raw_presence_df is not None and not raw_presence_df.empty:
         raw_rows = raw_presence_df[
             (raw_presence_df["table_name"].isin(["website_events", "website_sessions"]))
             & (raw_presence_df["table_schema"].isin(["raw", "r2_iceberg.raw"]))
         ]
         for row in raw_rows.itertuples(index=False):
-            ref = _table_ref(str(row.table_catalog), str(row.table_schema), str(row.table_name))
+            table_catalog = str(row.table_catalog)
+            table_schema = str(row.table_schema)
+            table_name = str(row.table_name)
+            ref = _table_ref(table_catalog, table_schema, table_name)
+            priority = _raw_ref_priority(table_catalog, table_schema)
             if row.table_name == "website_events":
-                raw_events_ref = ref
+                if priority > raw_events_priority:
+                    raw_events_ref = ref
+                    raw_events_priority = priority
             elif row.table_name == "website_sessions":
-                raw_sessions_ref = ref
+                if priority > raw_sessions_priority:
+                    raw_sessions_ref = ref
+                    raw_sessions_priority = priority
 
     raw_events_exists = raw_events_ref is not None
     raw_sessions_exists = raw_sessions_ref is not None
@@ -251,6 +294,9 @@ def _sessions_pipeline_debug_panel() -> None:
     n_events_raw = _value_or_none(raw_counts_df, "n_events_raw")
     n_sessions_raw = _value_or_none(raw_counts_df, "n_sessions_raw")
     n_sessions_stg = _value_or_none(stg_counts_df, "n_sessions_stg")
+    n_events_raw_int = _to_int_or_none(n_events_raw)
+    n_sessions_raw_int = _to_int_or_none(n_sessions_raw)
+    n_sessions_stg_int = _to_int_or_none(n_sessions_stg)
 
     st.markdown("**Interpretation**")
     notes: list[str] = []
@@ -259,11 +305,19 @@ def _sessions_pipeline_debug_panel() -> None:
         notes.append(
             "`r2_iceberg.raw.website_sessions` is missing. Ingestion is not creating the raw sessions table, or sessions are intentionally derived from events only."
         )
-    if n_events_raw is not None and int(n_events_raw) > 0 and (n_sessions_raw is not None and int(n_sessions_raw) == 0):
+    if (
+        n_events_raw_int is not None
+        and n_events_raw_int > 0
+        and (n_sessions_raw_int is not None and n_sessions_raw_int == 0)
+    ):
         notes.append(
             "Events exist but raw sessions are zero. Sessions are not being emitted by the app, or ingestion is ignoring session objects."
         )
-    if n_sessions_raw is not None and int(n_sessions_raw) > 0 and (n_sessions_stg is not None and int(n_sessions_stg) == 0):
+    if (
+        n_sessions_raw_int is not None
+        and n_sessions_raw_int > 0
+        and (n_sessions_stg_int is not None and n_sessions_stg_int == 0)
+    ):
         notes.append(
             "Raw sessions exist but staging sessions are zero. The dbt session model logic is filtering or dropping rows."
         )
