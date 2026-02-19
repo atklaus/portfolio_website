@@ -86,6 +86,10 @@ jobs:
             --endpoint-url "${R2_ENDPOINT}" \
             --cache-control "no-cache" \
             --delete
+      - name: Publish SEO static files to R2
+        run: |
+          export R2_BUCKET="${R2_PUBLIC_BUCKET:-${R2_BUCKET}}"
+          poetry run python scripts/publish_seo_static.py
       - name: Run Great Expectations (non-blocking)
         run: |
           poetry run python scripts/run_gx.py || true

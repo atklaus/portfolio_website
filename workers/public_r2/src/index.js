@@ -24,6 +24,17 @@ const CONTENT_TYPES = {
 const FRAME_ANCESTORS =
   "frame-ancestors https://databuilds.dev http://localhost:8501";
 
+const SEO_FILES = {
+  "/sitemap.xml": {
+    key: "sitemap.xml",
+    contentType: "application/xml; charset=utf-8",
+  },
+  "/robots.txt": {
+    key: "robots.txt",
+    contentType: "text/plain; charset=utf-8",
+  },
+};
+
 function contentTypeFor(key) {
   const dot = key.lastIndexOf(".");
   if (dot === -1) return null;
@@ -49,13 +60,14 @@ export default {
     }
 
     const url = new URL(request.url);
-    let key = url.pathname.replace(/^\/+/, "");
+    const seoConfig = SEO_FILES[url.pathname];
+    let key = seoConfig ? seoConfig.key : url.pathname.replace(/^\/+/, "");
 
     if (!key) {
       return new Response("Not Found", { status: 404 });
     }
 
-    if (key.endsWith("/")) {
+    if (!seoConfig && key.endsWith("/")) {
       key += "index.html";
     }
 
@@ -67,7 +79,7 @@ export default {
     const headers = new Headers();
     object.writeHttpMetadata(headers);
 
-    const contentType = contentTypeFor(key);
+    const contentType = seoConfig?.contentType || contentTypeFor(key);
     if (contentType) {
       headers.set("Content-Type", contentType);
     }

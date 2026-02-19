@@ -1,4 +1,5 @@
 import os
+from datetime import datetime, timezone
 from typing import Any
 
 import pandas as pd
@@ -8,6 +9,7 @@ import streamlit.components.v1 as components
 
 from app.layout import header
 from shared.telemetry import page_guard
+from shared.settings import get_settings
 
 
 DBT_DOCS_BASE_URL_DEFAULT = "https://public.databuilds.dev/dbt_docs/latest"
@@ -134,10 +136,148 @@ def _bullet_list(items: list[str]) -> None:
     st.markdown(lines)
 
 
+def _format_generated_at(value: str) -> str:
+    if not value or value == "unknown":
+        return "Unknown"
+    try:
+        cleaned = value.replace("Z", "+00:00")
+        parsed = datetime.fromisoformat(cleaned)
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        local_time = parsed.astimezone()
+        day = local_time.strftime("%d").lstrip("0")
+        hour = local_time.strftime("%I").lstrip("0") or "0"
+        return f"{local_time.strftime('%b')} {day}, {local_time.strftime('%Y')} {hour}:{local_time.strftime('%M %p')}"
+    except Exception:
+        return str(value)
+
+
+def _format_exec_time(seconds: float) -> str:
+    if seconds <= 0:
+        return "0s"
+    if seconds < 1:
+        ms = seconds * 1000
+        if ms < 10:
+            return f"{ms:.1f}ms"
+        return f"{ms:.0f}ms"
+    if seconds < 10:
+        return f"{seconds:.2f}s"
+    if seconds < 60:
+        return f"{seconds:.1f}s"
+    return f"{seconds:.0f}s"
+
+
 with page_guard(os.path.basename(__file__)):
     header.page_header("Analytics Ops", page_name=os.path.basename(__file__))
 
-    st.subheader("dbt docs + lineage powering this site")
+    settings = get_settings()
+    github_profile_url = settings.github_url
+    linkedin_profile_url = settings.linkedin_url
+
+    st.markdown(
+        """
+        <style>
+        .dp-scope {
+          max-width: 1180px;
+          margin: 0 auto 0.75rem auto;
+        }
+        .dp-header {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 1.5rem;
+          padding: 0.35rem 0 0.55rem 0;
+          border-bottom: 1px solid rgba(155, 231, 216, 0.16);
+        }
+        .dp-title {
+          font-size: 1.6rem;
+          font-weight: 700;
+          color: var(--ads-ink);
+          margin: 0 0 0.15rem 0;
+        }
+        .dp-subtitle {
+          font-size: 0.95rem;
+          color: var(--ads-muted);
+          margin: 0;
+        }
+        .dp-actions {
+          display: inline-flex;
+          align-items: center;
+          gap: 0.5rem;
+        }
+        .dp-stats {
+          margin: 0.8rem 0 0.55rem 0;
+        }
+        .dp-stat-card {
+          border-radius: 14px;
+          padding: 0.85rem 0.95rem;
+          border: 1px solid rgba(155, 231, 216, 0.16);
+          background: rgba(255, 255, 255, 0.04);
+          min-height: 86px;
+        }
+        .dp-stat-label {
+          font-size: 0.74rem;
+          letter-spacing: 0.08em;
+          text-transform: uppercase;
+          color: rgba(178, 200, 195, 0.75);
+          margin-bottom: 0.4rem;
+        }
+        .dp-stat-value {
+          font-size: 1.25rem;
+          font-weight: 600;
+          color: var(--ads-ink);
+        }
+        .dp-stat-value--muted {
+          color: rgba(178, 200, 195, 0.7);
+        }
+        .dp-stat-value--alert {
+          color: #ffb3a7;
+        }
+        .dp-scope [data-testid="stExpander"] > details {
+          border-radius: 12px;
+          border: 1px solid rgba(155, 231, 216, 0.12);
+          background: rgba(255, 255, 255, 0.02);
+        }
+        .dp-scope [data-testid="stExpander"] summary {
+          font-size: 0.9rem;
+        }
+        .dp-source-link {
+          display: inline-flex;
+          align-items: center;
+          gap: 0.4rem;
+          font-size: 0.82rem;
+          font-weight: 600;
+          color: var(--ads-ink);
+          text-decoration: none;
+          border-radius: 999px;
+          padding: 0.3rem 0.7rem;
+          border: 1px solid rgba(155, 231, 216, 0.28);
+          background: rgba(155, 231, 216, 0.12);
+        }
+        .dp-source-link:hover {
+          border-color: rgba(155, 231, 216, 0.6);
+          background: rgba(155, 231, 216, 0.2);
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    st.markdown('<div class="dp-scope">', unsafe_allow_html=True)
+    header_html = f"""
+    <div class="dp-header">
+      <div>
+        <div class="dp-title">Analytics Ops</div>
+        <div class="dp-subtitle">dbt docs + lineage powering this site</div>
+      </div>
+      <div class="dp-actions">
+        <a class="ads-icon-btn" href="/" target="_self" rel="noopener" aria-label="Home"><i class="fas fa-home"></i></a>
+        <a class="ads-icon-btn" href="{github_profile_url}" target="_blank" rel="noopener" aria-label="GitHub"><i class="fas fa-code"></i></a>
+        <a class="ads-icon-btn" href="{linkedin_profile_url}" target="_blank" rel="noopener" aria-label="LinkedIn"><i class="fab fa-linkedin"></i></a>
+      </div>
+    </div>
+    """
+    st.markdown(header_html, unsafe_allow_html=True)
 
     docs_base_url = _get_docs_base_url()
     manifest_url = f"{docs_base_url}/manifest.json"
@@ -178,28 +318,65 @@ with page_guard(os.path.basename(__file__)):
             }
         )
 
-    st.markdown("Run summary")
+    def _stat_card(label: str, value: str, value_class: str = "") -> str:
+        value_classes = " ".join(item for item in ["dp-stat-value", value_class] if item)
+        return f"""
+        <div class="dp-stat-card">
+          <div class="dp-stat-label">{label}</div>
+          <div class="{value_classes}">{value}</div>
+        </div>
+        """
+
     if run_results is None:
-        st.caption("run_results.json not available (ok).")
+        generated_at_raw = "unknown"
+        generated_at_display = "Unknown"
+        exec_time_display = "—"
+        failures = None
     else:
         metadata = run_results.get("metadata", {}) or {}
-        generated_at = metadata.get("generated_at") or "unknown"
+        generated_at_raw = metadata.get("generated_at") or "unknown"
+        generated_at_display = _format_generated_at(str(generated_at_raw))
         results = run_results.get("results", []) or []
         total_exec_time = sum(result.get("execution_time") or 0 for result in results)
+        exec_time_display = _format_exec_time(total_exec_time)
         failures = sum(1 for result in results if (result.get("status") or "") != "success")
-        model_count = sum(1 for node in nodes.values() if node.get("resource_type") == "model")
 
-        c1, c2, c3, c4 = st.columns(4)
-        c1.metric("Generated at", str(generated_at))
-        c2.metric("Models", str(model_count))
-        c3.metric("Total exec time (s)", f"{total_exec_time:.2f}")
-        c4.metric("Failures/Errors", str(failures))
+    model_count = sum(1 for node in nodes.values() if node.get("resource_type") == "model")
+
+    st.markdown('<div class="dp-stats">', unsafe_allow_html=True)
+    c1, c2, c3, c4 = st.columns(4)
+    c1.markdown(_stat_card("Generated", generated_at_display), unsafe_allow_html=True)
+    c2.markdown(_stat_card("Models", str(model_count)), unsafe_allow_html=True)
+    c3.markdown(_stat_card("Exec time", exec_time_display), unsafe_allow_html=True)
+    if failures is None:
+        failures_value = "—"
+        failures_class = "dp-stat-value--muted"
+    elif failures == 0:
+        failures_value = "0"
+        failures_class = "dp-stat-value--muted"
+    else:
+        failures_value = str(failures)
+        failures_class = "dp-stat-value--alert"
+    c4.markdown(_stat_card("Failures", failures_value, failures_class), unsafe_allow_html=True)
+    st.markdown("</div>", unsafe_allow_html=True)
+
+    with st.expander("Run details"):
+        st.markdown(f"**Generated at (raw):** `{generated_at_raw}`")
+        invocation_id = None
+        if run_results is not None:
+            invocation_id = (run_results.get("metadata", {}) or {}).get("invocation_id")
+        if invocation_id:
+            st.markdown(f"**Invocation id:** `{invocation_id}`")
+        st.markdown(
+            f'<a class="dp-source-link" href="{docs_base_url}" target="_blank" rel="noopener">Source</a>',
+            unsafe_allow_html=True,
+        )
+
+    st.markdown("</div>", unsafe_allow_html=True)
 
     models_tab, docs_tab, quality_tab = st.tabs(["Models", "Docs", "Quality"])
 
     with models_tab:
-        st.caption(f"Source: {docs_base_url}")
-
         left, right = st.columns([2, 3])
         search_term = left.text_input("Search model name", value="")
         layer_options = ["stg", "int", "marts", "snapshots", "seeds", "other"]
