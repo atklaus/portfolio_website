@@ -1,6 +1,8 @@
 import os
 from dotenv import load_dotenv
 
+from shared.logging import telemetry
+
 load_dotenv()
 
 CREDS = os.environ
@@ -74,13 +76,15 @@ MOD_ACCESS = {
     ,'tags': ('Data Engineering', 'ETL', 'Fuzzy Matching', 'Record Linkage')
     }
 
-    ,'telemetry_admin': {
+    ,'telemetry': {
     'button': '🧭 Site Analytics'
-    ,'name': 'telemetry_admin'
+    ,'name': 'telemetry'
     ,'description': 'Telemetry admin and site analytics.'
     ,'group': 'admin'
     ,'hidden': True
     ,'enabled': os.environ.get("MOD_ADMIN_ENABLED", "").strip().lower() in {"1", "true", "yes", "y"}
+    ,"include_in_sitemap": False
+    ,"include_in_nav": True
     }
 
     }

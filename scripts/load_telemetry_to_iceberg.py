@@ -7,8 +7,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-import pandas as pd
-
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
@@ -56,7 +54,7 @@ def _has_parquet_files(con, glob: str) -> bool:
         raise
 
 
-def _list_parquet_objects(prefix: str) -> pd.DataFrame:
+def _list_parquet_objects(prefix: str) -> list[tuple[str, str, int, dt.datetime | None]]:
     """Return object metadata for parquet files under an S3/R2 prefix.
 
     Used for idempotency when parquet keys may be overwritten in-place.
@@ -65,7 +63,7 @@ def _list_parquet_objects(prefix: str) -> pd.DataFrame:
     client = get_client()
     bucket = get_bucket()
 
-    rows: list[dict[str, Any]] = []
+    rows: list[tuple[str, str, int, dt.datetime | None]] = []
     paginator = client.get_paginator("list_objects_v2")
     for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
         for item in page.get("Contents", []):
@@ -77,16 +75,9 @@ def _list_parquet_objects(prefix: str) -> pd.DataFrame:
             if isinstance(last_modified, dt.datetime):
                 last_modified = last_modified.replace(tzinfo=dt.timezone.utc)
             size = int(item.get("Size") or 0)
-            rows.append(
-                {
-                    "source_file": f"s3://{bucket}/{key}",
-                    "etag": etag,
-                    "last_modified": last_modified,
-                    "size_bytes": size,
-                }
-            )
+            rows.append((f"s3://{bucket}/{key}", etag, size, last_modified))
 
-    return pd.DataFrame(rows)
+    return rows
 
 
 def _ensure_table_columns(con, table: str, view: str) -> None:
@@ -167,20 +158,53 @@ def _load_dataset(con, spec: DatasetSpec) -> dict[str, Any]:
         """
     )
 
-    meta_df = _list_parquet_objects(spec.prefix)
-    if meta_df.empty:
-        return {"dataset": spec.dataset, "new_files": 0, "new_rows": 0}
+    meta_rows = _list_parquet_objects(spec.prefix)
+    if not meta_rows:
+        return {
+            "dataset": spec.dataset,
+            "source_files": 0,
+            "new_files": 0,
+            "new_rows": 0,
+            "total_rows": 0,
+        }
 
-    con.register("file_meta_df", meta_df)
+    con.execute("DROP TABLE IF EXISTS file_meta")
     con.execute(
         """
-        CREATE OR REPLACE TEMP VIEW file_meta AS
+        CREATE TEMP TABLE file_meta (
+            source_file VARCHAR,
+            etag VARCHAR,
+            size_bytes BIGINT,
+            last_modified TIMESTAMP
+        )
+        """
+    )
+    con.executemany(
+        """
+        INSERT INTO file_meta (source_file, etag, size_bytes, last_modified)
+        VALUES (?, ?, ?, ?)
+        """,
+        meta_rows,
+    )
+
+    con.execute(
+        """
+        CREATE OR REPLACE TEMP VIEW file_meta_dedup AS
         SELECT
             source_file,
             etag,
             size_bytes,
             last_modified
-        FROM file_meta_df
+        FROM (
+            SELECT
+                *,
+                row_number() over (
+                    partition by source_file, coalesce(etag, '')
+                    order by coalesce(last_modified, TIMESTAMP '1970-01-01') desc
+                ) as rn
+            FROM file_meta
+        )
+        WHERE rn = 1
         """
     )
 
@@ -188,7 +212,7 @@ def _load_dataset(con, spec: DatasetSpec) -> dict[str, Any]:
         f"""
         CREATE OR REPLACE TEMP VIEW new_files AS
         SELECT DISTINCT fm.source_file, fm.etag, fm.size_bytes, fm.last_modified
-        FROM file_meta fm
+        FROM file_meta_dedup fm
         LEFT JOIN r2_iceberg.raw.loaded_files lf
           ON lf.dataset = '{dataset_literal}'
          AND lf.source_file = fm.source_file
@@ -229,7 +253,14 @@ def _load_dataset(con, spec: DatasetSpec) -> dict[str, Any]:
             [spec.dataset],
         )
 
-    return {"dataset": spec.dataset, "new_files": int(file_count), "new_rows": int(row_count)}
+    total_rows = con.execute(f"SELECT COUNT(*) FROM {spec.table}").fetchone()[0]
+    return {
+        "dataset": spec.dataset,
+        "source_files": int(len(meta_rows)),
+        "new_files": int(file_count),
+        "new_rows": int(row_count),
+        "total_rows": int(total_rows),
+    }
 
 
 def main() -> None:
@@ -262,6 +293,13 @@ def main() -> None:
 
     _create_raw_table(con, events_spec.table, events_spec.glob)
     events_result = _load_dataset(con, events_spec)
+    print(
+        "events_load "
+        f"source_files={events_result['source_files']} "
+        f"new_files={events_result['new_files']} "
+        f"new_rows={events_result['new_rows']} "
+        f"table_rows={events_result['total_rows']}"
+    )
 
     sessions_result = None
     if _has_parquet_files(con, sessions_glob):
@@ -273,6 +311,13 @@ def main() -> None:
         )
         _create_raw_table(con, sessions_spec.table, sessions_spec.glob)
         sessions_result = _load_dataset(con, sessions_spec)
+        print(
+            "sessions_load "
+            f"source_files={sessions_result['source_files']} "
+            f"new_files={sessions_result['new_files']} "
+            f"new_rows={sessions_result['new_rows']} "
+            f"table_rows={sessions_result['total_rows']}"
+        )
     else:
         print("No session parquet files found; skipping sessions load.")
 

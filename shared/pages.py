@@ -29,15 +29,7 @@ _OVERRIDES: dict[str, dict[str, object]] = {
         "title": "Home",
         "icon": "🏠",
         "description": "End-to-end data products, pipelines, and applied ML with production-grade reliability.",
-    },
-    "telemetry_admin": {
-        "key": "telemetry",
-        "title": "Site Analytics",
-        "icon": "🧭",
-        "description": "Telemetry admin and storage diagnostics.",
-        "include_in_sitemap": False,
-        "include_in_nav": True,
-    },
+    }
 }
 
 

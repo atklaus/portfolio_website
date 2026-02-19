@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import gzip
-import io
 import json
 import os
+import tempfile
 from dataclasses import dataclass
 from datetime import datetime
 
@@ -70,23 +70,26 @@ class SpacesSink(BaseSink):
         if not is_configured(self.config.storage):
             return False
         try:
-            import pandas as pd
             import duckdb
 
-            df = pd.DataFrame([snapshot.__dict__])
-            parquet_buf = io.BytesIO()
-            duckdb.from_df(df).write_parquet(parquet_buf)
-            parquet_buf.seek(0)
+            relation = duckdb.values([tuple(snapshot.__dict__.values())], list(snapshot.__dict__.keys()))
+            with tempfile.NamedTemporaryFile(suffix=".parquet", delete=False) as handle:
+                tmp_path = handle.name
+            relation.write_parquet(tmp_path)
             try:
                 ts = datetime.fromisoformat(snapshot.ts_utc)
             except Exception:
                 ts = None
             key = storage_paths.telemetry_sessions_key(snapshot.session_id, ts=ts)
-            storage_io.put_bytes(
+            storage_io.put_file(
                 key,
-                parquet_buf.read(),
+                tmp_path,
                 content_type="application/x-parquet",
             )
+            try:
+                os.remove(tmp_path)
+            except Exception:
+                pass
             return True
         except Exception as exc:
             print(f"SpacesSink session upload failed: {exc}")
