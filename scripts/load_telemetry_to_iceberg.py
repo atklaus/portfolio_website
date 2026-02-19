@@ -96,7 +96,7 @@ def _view_columns(con, view: str) -> list[str]:
     return [str(row[0]) for row in con.execute(f"DESCRIBE SELECT * FROM {view}").fetchall()]
 
 
-def _insert_compatible_rows(con, table: str, view: str) -> None:
+def _insert_compatible_rows(con, table: str, view: str, new_files_view: str) -> None:
     """Insert rows using only the intersection of table/view columns.
 
     Iceberg table evolution via ALTER TABLE ADD COLUMN is not consistently available
@@ -133,7 +133,7 @@ def _insert_compatible_rows(con, table: str, view: str) -> None:
         INSERT INTO {table} ({insert_cols_sql})
         SELECT {select_cols_sql}
         FROM {view} s
-        INNER JOIN new_files nf ON nf.source_file = s.source_file
+        INNER JOIN {new_files_view} nf ON nf.source_file = s.source_file
         """
     )
 
@@ -235,6 +235,11 @@ def _staged_schema_sql(glob: str) -> str:
     )
 
 
+def _safe_temp_name(base: str, dataset: str) -> str:
+    suffix = "".join(ch if ch.isalnum() else "_" for ch in dataset.lower())
+    return f"{base}_{suffix}"
+
+
 @dataclass(frozen=True)
 class DatasetSpec:
     dataset: str
@@ -286,9 +291,14 @@ def _create_raw_table(con, table: str, glob: str) -> None:
 
 def _load_dataset(con, spec: DatasetSpec) -> dict[str, Any]:
     dataset_literal = _sql_escape(spec.dataset)
+    staged_rows_view = _safe_temp_name("staged_rows", spec.dataset)
+    file_meta_table = _safe_temp_name("file_meta", spec.dataset)
+    file_meta_dedup_view = _safe_temp_name("file_meta_dedup", spec.dataset)
+    new_files_view = _safe_temp_name("new_files", spec.dataset)
+
     con.execute(
         f"""
-        CREATE OR REPLACE TEMP VIEW staged_rows AS
+        CREATE OR REPLACE TEMP VIEW {staged_rows_view} AS
         {_staged_schema_sql(spec.glob)}
         """
     )
@@ -303,10 +313,10 @@ def _load_dataset(con, spec: DatasetSpec) -> dict[str, Any]:
             "total_rows": 0,
         }
 
-    con.execute("DROP TABLE IF EXISTS file_meta")
+    con.execute(f"DROP TABLE IF EXISTS {file_meta_table}")
     con.execute(
-        """
-        CREATE TEMP TABLE file_meta (
+        f"""
+        CREATE TEMP TABLE {file_meta_table} (
             source_file VARCHAR,
             etag VARCHAR,
             size_bytes BIGINT,
@@ -315,16 +325,16 @@ def _load_dataset(con, spec: DatasetSpec) -> dict[str, Any]:
         """
     )
     con.executemany(
-        """
-        INSERT INTO file_meta (source_file, etag, size_bytes, last_modified)
+        f"""
+        INSERT INTO {file_meta_table} (source_file, etag, size_bytes, last_modified)
         VALUES (?, ?, ?, ?)
         """,
         meta_rows,
     )
 
     con.execute(
-        """
-        CREATE OR REPLACE TEMP VIEW file_meta_dedup AS
+        f"""
+        CREATE OR REPLACE TEMP VIEW {file_meta_dedup_view} AS
         SELECT
             source_file,
             etag,
@@ -337,7 +347,7 @@ def _load_dataset(con, spec: DatasetSpec) -> dict[str, Any]:
                     partition by source_file, coalesce(etag, '')
                     order by coalesce(last_modified, TIMESTAMP '1970-01-01') desc
                 ) as rn
-            FROM file_meta
+            FROM {file_meta_table}
         )
         WHERE rn = 1
         """
@@ -345,9 +355,9 @@ def _load_dataset(con, spec: DatasetSpec) -> dict[str, Any]:
 
     con.execute(
         f"""
-        CREATE OR REPLACE TEMP VIEW new_files AS
+        CREATE OR REPLACE TEMP VIEW {new_files_view} AS
         SELECT DISTINCT fm.source_file, fm.etag, fm.size_bytes, fm.last_modified
-        FROM file_meta_dedup fm
+        FROM {file_meta_dedup_view} fm
         LEFT JOIN r2_iceberg.raw.loaded_files lf
           ON lf.dataset = '{dataset_literal}'
          AND lf.source_file = fm.source_file
@@ -356,25 +366,25 @@ def _load_dataset(con, spec: DatasetSpec) -> dict[str, Any]:
         """
     )
 
-    file_count = con.execute("SELECT COUNT(*) FROM new_files").fetchone()[0]
+    file_count = con.execute(f"SELECT COUNT(*) FROM {new_files_view}").fetchone()[0]
     row_count = con.execute(
-        """
+        f"""
         SELECT COUNT(*)
-        FROM staged_rows s
-        INNER JOIN new_files nf ON nf.source_file = s.source_file
+        FROM {staged_rows_view} s
+        INNER JOIN {new_files_view} nf ON nf.source_file = s.source_file
         """
     ).fetchone()[0]
 
     if file_count:
-        _insert_compatible_rows(con, spec.table, "staged_rows")
+        _insert_compatible_rows(con, spec.table, staged_rows_view, new_files_view)
 
         con.execute(
-            """
+            f"""
             INSERT INTO r2_iceberg.raw.loaded_files (
               dataset, source_file, etag, size_bytes, last_modified, loaded_at
             )
             SELECT ?, source_file, etag, size_bytes, last_modified, now()
-            FROM new_files
+            FROM {new_files_view}
             """,
             [spec.dataset],
         )
