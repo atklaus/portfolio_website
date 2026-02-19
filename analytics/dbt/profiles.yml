@@ -1,17 +1,16 @@
 portfolio_analytics:
-  target: local
+  target: "{{ 'iceberg' if env_var('R2_ICEBERG_TOKEN', '') != '' else 'local' }}"
   outputs:
     local:
       type: duckdb
       path: "{{ env_var('DBT_DUCKDB_PATH', '../artifacts/warehouse.duckdb') }}"
       schema: main
-      threads: 4
-
+      threads: 1
     iceberg:
       type: duckdb
       path: "{{ env_var('DBT_DUCKDB_PATH', '../artifacts/warehouse.duckdb') }}"
       schema: main
-      threads: 4
+      threads: 1
       settings:
         s3_region: "{{ env_var('R2_REGION', 'auto') }}"
         s3_endpoint: "{{ env_var('R2_ENDPOINT', '') }}"

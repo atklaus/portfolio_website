@@ -1,2 +1,9 @@
 {
+  "terminal.integrated.profiles.osx": {
+    "dbt-iceberg": {
+      "path": "zsh",
+      "args": ["-lc", "set -a; source ./.env.iceberg; set +a; exec zsh -i"]
+    }
+  },
+  "terminal.integrated.defaultProfile.osx": "dbt-iceberg"
 }

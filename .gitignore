@@ -188,3 +188,5 @@ analytics/artifacts/
 *.flv
 *.mov
 *.wmv
+analytics/.env.iceberg
+.env.iceberg
