@@ -90,6 +90,22 @@ The admin analytics page queries Parquet by default and falls back to JSONL.gz i
 has not been rolled up yet. To keep latency and listing costs low, limit JSONL queries to
 the last 7 days and retain only the required raw history.
 
+### Submission Tracking (Per Page)
+
+Submission telemetry is configured per page in `shared/telemetry/config.py` under
+`TELEMETRY_SUBMISSION_TRACKING`.
+
+Each page slug can define:
+- `event_name`: emitted event type (usually `submission`)
+- `allowed_fields`: explicit whitelist of fields to log
+- `redaction_rules`: per-field rules (`keep`, `hash`, `drop`, `bucketize`)
+- `dedupe_window_seconds`: rerun dedupe window to prevent duplicate emits
+
+To add tracking to a page:
+1. Add a page config entry keyed by page slug in `shared/telemetry/config.py`.
+2. Call `track_submission(page_id=..., form_id=..., inputs=..., tags=...)` only at the form/button submit point.
+3. Keep `inputs` minimal and explicit; only allowlisted fields are persisted.
+
 ## Local Development
 
 ### Run the app

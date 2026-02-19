@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
+from typing import Any
 
 from lib.storage.s3_compat import StorageConfig, get_storage_config, is_configured
 
@@ -61,16 +62,34 @@ def warn_if_unconfigured() -> None:
         _WARNED_UNCONFIGURED = True
 
 
-TELEMETRY_SUBMISSIONS_ENABLED_PAGES = {"wnba_success"}
-
-TELEMETRY_SUBMISSION_ALLOWLIST = {
-    "wnba_success": [
-        "season",
-        "college",
-        "player",
-        "offline_mode",
-        "data_source",
-        "model_version",
-        "dataset_version",
-    ]
+TELEMETRY_SUBMISSION_TRACKING: dict[str, dict[str, Any]] = {
+    "wnba_success": {
+        "event_name": "submission",
+        "allowed_fields": [
+            "season",
+            "college",
+            "player",
+            "offline_mode",
+            "data_source",
+            "model_version",
+            "dataset_version",
+        ],
+        # Rule values: keep (default), hash, drop, bucketize.
+        # bucketize expects {"action": "bucketize", "bins": [...], "labels": [...]}
+        "redaction_rules": {},
+        # Prevent duplicate submission events on immediate Streamlit reruns.
+        "dedupe_window_seconds": 2.0,
+    },
 }
+
+
+def get_submission_tracking(page_slug: str) -> dict[str, Any] | None:
+    raw = TELEMETRY_SUBMISSION_TRACKING.get(page_slug)
+    if raw is None:
+        return None
+    return {
+        "event_name": str(raw.get("event_name") or "submission"),
+        "allowed_fields": [str(item) for item in raw.get("allowed_fields", [])],
+        "redaction_rules": dict(raw.get("redaction_rules", {})),
+        "dedupe_window_seconds": float(raw.get("dedupe_window_seconds", 2.0)),
+    }

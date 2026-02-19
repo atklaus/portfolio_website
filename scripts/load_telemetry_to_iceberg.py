@@ -267,7 +267,7 @@ def main() -> None:
     bucket = _require_env("R2_BUCKET")
 
     events_prefix = _get_env("TELEMETRY_EVENTS_PARQUET_PREFIX", "telemetry/events_parquet/")
-    sessions_prefix = _get_env("TELEMETRY_SESSIONS_PARQUET_PREFIX", "telemetry/sessions_parquet/")
+    sessions_prefix = _get_env("TELEMETRY_SESSIONS_PARQUET_PREFIX", "telemetry/sessions/")
 
     events_glob = f"s3://{bucket}/{events_prefix}date=*/**/*.parquet"
     sessions_glob = f"s3://{bucket}/{sessions_prefix}date=*/**/*.parquet"

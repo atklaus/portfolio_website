@@ -11,25 +11,30 @@ import streamlit as st
 
 from lib.ops.memory import log_mem
 from lib.telemetry.privacy import (
-    dump_json_limited,
     filter_allowlist,
     redact_inputs,
     truncate_structure,
 )
 from .config import (
-    TELEMETRY_SUBMISSION_ALLOWLIST,
-    TELEMETRY_SUBMISSIONS_ENABLED_PAGES,
     TelemetryConfig,
+    get_submission_tracking,
     get_config,
 )
 from shared.logging.ops import set_log_context
 from .session import (
     ensure_session_id,
     ensure_session_started,
+    ensure_visitor_id,
     increment_error,
     increment_event,
     register_page,
     snapshot,
+)
+from .submission import (
+    apply_redaction_rules,
+    build_submission_fingerprint,
+    mark_submission_if_new,
+    next_submission_index,
 )
 from .sinks import build_sinks
 
@@ -102,6 +107,7 @@ def log_event(
     page: str,
     payload: dict | None = None,
     duration_ms: int | None = None,
+    trace_id: str | None = None,
 ) -> None:
     config = get_config()
     if not config.enabled:
@@ -109,16 +115,22 @@ def log_event(
     try:
         ensure_session_started()
         session_id = ensure_session_id()
+        visitor_id = ensure_visitor_id()
         set_log_context(page=page, session_id=session_id)
         event = {
             "ts_utc": _utc_now_iso(),
             "session_id": session_id,
+            "visitor_id": visitor_id,
             "page": page,
+            "page_slug": page,
             "event_type": event_type,
+            "event_name": event_type,
             "duration_ms": duration_ms,
             "payload": payload or {},
             "app_version": config.app_version,
         }
+        if trace_id:
+            event["trace_id"] = trace_id
         _buffer_event(config, event)
         now = time.time()
         last_flush = _state().get("telemetry_last_flush", 0)
@@ -164,33 +176,53 @@ def track_submission(
     config = get_config()
     if not config.enabled:
         return
-    if page_id not in TELEMETRY_SUBMISSIONS_ENABLED_PAGES:
+    page_submission_config = get_submission_tracking(page_id)
+    if page_submission_config is None:
         return
     try:
         ensure_session_started()
         session_id = ensure_session_id()
+        visitor_id = ensure_visitor_id()
         set_log_context(page=page_id, session_id=session_id)
-        allowlist = TELEMETRY_SUBMISSION_ALLOWLIST.get(page_id)
+        event_name = str(page_submission_config.get("event_name") or "submission")
+        allowlist = page_submission_config.get("allowed_fields", [])
+        redaction_rules = page_submission_config.get("redaction_rules", {})
+        dedupe_window_seconds = float(page_submission_config.get("dedupe_window_seconds", 2.0))
+
         filtered = filter_allowlist(inputs or {}, allowlist)
         redacted = redact_inputs(filtered)
-        truncated = truncate_structure(redacted)
-        envelope: dict[str, Any] = {
+        transformed, applied_rules = apply_redaction_rules(redacted, redaction_rules)
+        truncated = truncate_structure(transformed)
+
+        fingerprint = build_submission_fingerprint(
+            page_slug=page_id,
+            event_name=event_name,
+            form_id=form_id,
+            fields=truncated,
+            tags=tags,
+        )
+        if not mark_submission_if_new(fingerprint, dedupe_window_seconds):
+            return
+
+        submission_id = uuid4().hex
+        payload: dict[str, Any] = {
+            "submission_id": submission_id,
+            "submission_index": next_submission_index(),
+            "submitted_at": _utc_now_iso(),
+            "page_slug": page_id,
             "form_id": form_id,
-            "inputs": truncated,
+            "fields": truncated,
+            "tags": tags or {},
+            "input_fingerprint": fingerprint,
+            "visitor_id": visitor_id,
         }
-        if tags:
-            envelope["tags"] = tags
-        payload_json = dump_json_limited(envelope)
-        trace_id = uuid4().hex[:10]
+        if applied_rules:
+            payload["redaction_rules_applied"] = applied_rules
         log_event(
-            "submission",
+            event_name,
             page_id,
-            payload={
-                "trace_id": trace_id,
-                "payload_json": payload_json,
-                "form_id": form_id,
-                "tags": tags or {},
-            },
+            payload=payload,
+            trace_id=submission_id,
         )
     except Exception as exc:
         print(f"Telemetry track_submission failed: {exc}")

@@ -12,7 +12,9 @@ EVENT_COLUMNS = [
     "event_name",
     "page_id",
     "session_id",
+    "visitor_id",
     "trace_id",
+    "submission_id",
     "event_id",
     "app_version",
     "instance_id",
@@ -76,12 +78,20 @@ def normalize_event(raw: dict) -> dict:
         raw.get("name"),
     )
 
-    page_id = _first_nonempty(raw.get("page_id"), raw.get("page"))
+    page_id = _first_nonempty(raw.get("page_id"), raw.get("page_slug"), raw.get("page"))
     session_id = raw.get("session_id")
+    visitor_id = _first_nonempty(
+        raw.get("visitor_id"),
+        payload.get("visitor_id") if isinstance(payload, dict) else None,
+    )
 
     trace_id = _first_nonempty(
         raw.get("trace_id"),
         payload.get("trace_id") if isinstance(payload, dict) else None,
+    )
+    submission_id = _first_nonempty(
+        raw.get("submission_id"),
+        payload.get("submission_id") if isinstance(payload, dict) else None,
     )
 
     app_version = _first_nonempty(raw.get("app_version"), raw.get("version"))
@@ -111,9 +121,12 @@ def normalize_event(raw: dict) -> dict:
         "event_type",
         "name",
         "page_id",
+        "page_slug",
         "page",
         "session_id",
+        "visitor_id",
         "trace_id",
+        "submission_id",
         "app_version",
         "version",
         "instance_id",
@@ -143,6 +156,7 @@ def normalize_event(raw: dict) -> dict:
             [
                 str(ts or ""),
                 str(session_id or ""),
+                str(visitor_id or ""),
                 str(event_name or ""),
                 str(page_id or ""),
                 str(trace_id or ""),
@@ -156,7 +170,9 @@ def normalize_event(raw: dict) -> dict:
         "event_name": str(event_name) if event_name is not None else None,
         "page_id": str(page_id) if page_id is not None else None,
         "session_id": str(session_id) if session_id is not None else None,
+        "visitor_id": str(visitor_id) if visitor_id is not None else None,
         "trace_id": str(trace_id) if trace_id is not None else None,
+        "submission_id": str(submission_id) if submission_id is not None else None,
         "event_id": event_id,
         "app_version": str(app_version) if app_version is not None else None,
         "instance_id": str(instance_id) if instance_id is not None else None,

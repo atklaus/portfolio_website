@@ -1,0 +1,110 @@
+version: 2
+
+models:
+  - name: stg_website_events
+    description: >
+      Canonical staging model for website telemetry events from Iceberg raw.website_events.
+      Includes backward-compatible extraction of submission payload fields from payload_json.
+    columns:
+      - name: occurred_at
+        description: Canonical event timestamp in UTC.
+      - name: event_name
+        description: Event type name (page_view, error, submission, etc.).
+      - name: page_slug
+        description: Normalized page identifier, derived from page_id or payload JSON.
+      - name: session_id
+        description: App/browser session identifier.
+      - name: visitor_id
+        description: Browser/visitor identifier when available.
+      - name: submission_id
+        description: Submission identifier for submission events, with trace fallback.
+      - name: submitted_at
+        description: Submission timestamp from payload_json, fallback to occurred_at.
+      - name: submission_number_in_session
+        description: Submission counter within a session when emitted.
+      - name: fields
+        description: Submission fields payload as JSON.
+      - name: tags
+        description: Submission tags payload as JSON.
+      - name: payload_json
+        description: Original normalized payload JSON string.
+      - name: source_file
+        description: Raw parquet source object path.
+      - name: ingestion_date
+        description: Date the record was ingested into Iceberg.
+
+  - name: stg_website_sessions
+    description: >
+      Canonical staging model for website telemetry session snapshots from Iceberg raw.website_sessions.
+      Supports older snapshots that may not include visitor_id/page_slug/started_at/ended_at.
+    columns:
+      - name: session_id
+        description: App/browser session identifier.
+      - name: visitor_id
+        description: Browser/visitor identifier when available.
+      - name: page_slug
+        description: Session page slug from payload or derived from last_page.
+      - name: started_at
+        description: Session start timestamp when present; fallback to snapshot timestamp.
+      - name: ended_at
+        description: Session end timestamp when present; fallback to snapshot timestamp.
+      - name: snapshot_at
+        description: Session snapshot timestamp.
+      - name: source_file
+        description: Raw parquet source object path.
+      - name: ingestion_date
+        description: Date the session snapshot was ingested into Iceberg.
+
+  - name: telemetry_submissions
+    description: >
+      One row per deduplicated submission event from stg_website_events.
+      Dedupe preference: submission_id; fallback: hash(session_id, page_slug, submitted_at, fields).
+    columns:
+      - name: event_name
+        description: Constant submission event name.
+        data_tests:
+          - accepted_values:
+              values: ['submission']
+      - name: submitted_at
+        description: Submission timestamp in UTC.
+        data_tests:
+          - not_null
+      - name: page_slug
+        description: Submitting page slug.
+        data_tests:
+          - not_null
+      - name: session_id
+        description: Session identifier at submit time.
+        data_tests:
+          - not_null
+      - name: visitor_id
+        description: Visitor identifier at submit time.
+      - name: submission_id
+        description: Submission identifier when available.
+        data_tests:
+          - unique:
+              config:
+                where: "submission_id is not null"
+      - name: submission_number_in_session
+        description: Optional sequence number of the submission in the session.
+      - name: fields
+        description: Structured submission field payload (JSON).
+      - name: tags
+        description: Structured submission tags payload (JSON).
+      - name: dedupe_key
+        description: Deterministic dedupe key used for model-level uniqueness.
+        data_tests:
+          - not_null
+          - unique
+
+  - name: telemetry_submission_daily
+    description: Daily submission rollup by page_slug.
+    columns:
+      - name: date
+        description: UTC date of submission activity.
+      - name: page_slug
+        description: Page slug.
+      - name: submissions_count
+        description: Number of deduped submissions that day.
+      - name: unique_visitors_count
+        description: Distinct visitor_ids with submissions that day.
