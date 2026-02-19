@@ -84,8 +84,12 @@ def _quote_ident(value: str) -> str:
     return '"' + value.replace('"', '""') + '"'
 
 
+def _table_column_info(con, table: str) -> list[tuple[str, str]]:
+    return [(str(row[1]), str(row[2])) for row in con.execute(f"PRAGMA table_info('{table}')").fetchall()]
+
+
 def _table_columns(con, table: str) -> list[str]:
-    return [str(row[1]) for row in con.execute(f"PRAGMA table_info('{table}')").fetchall()]
+    return [name for name, _ in _table_column_info(con, table)]
 
 
 def _view_columns(con, view: str) -> list[str]:
@@ -99,7 +103,8 @@ def _insert_compatible_rows(con, table: str, view: str) -> None:
     across DuckDB versions/catalog integrations. This keeps ingestion resilient when
     staged parquet adds new columns.
     """
-    table_cols = _table_columns(con, table)
+    table_info = _table_column_info(con, table)
+    table_cols = [name for name, _ in table_info]
     staged_cols = _view_columns(con, view)
     staged_set = set(staged_cols)
     insert_cols = [col for col in table_cols if col in staged_set]
@@ -118,7 +123,11 @@ def _insert_compatible_rows(con, table: str, view: str) -> None:
         )
 
     insert_cols_sql = ", ".join(_quote_ident(col) for col in insert_cols)
-    select_cols_sql = ", ".join(f"s.{_quote_ident(col)}" for col in insert_cols)
+    type_lookup = {name: col_type for name, col_type in table_info}
+    select_cols_sql = ", ".join(
+        f"try_cast(s.{_quote_ident(col)} as {type_lookup[col]}) as {_quote_ident(col)}"
+        for col in insert_cols
+    )
     con.execute(
         f"""
         INSERT INTO {table} ({insert_cols_sql})
@@ -126,6 +135,65 @@ def _insert_compatible_rows(con, table: str, view: str) -> None:
         FROM {view} s
         INNER JOIN new_files nf ON nf.source_file = s.source_file
         """
+    )
+
+
+def _split_table_name(table: str) -> tuple[str, str, str]:
+    parts = table.split(".")
+    if len(parts) != 3:
+        raise ValueError(f"Expected catalog.schema.table format, got: {table}")
+    return parts[0], parts[1], parts[2]
+
+
+def _table_exists(con, table: str) -> bool:
+    catalog, schema, name = _split_table_name(table)
+    row = con.execute(
+        """
+        SELECT 1
+        FROM r2_iceberg.information_schema.tables
+        WHERE table_catalog = ? AND table_schema = ? AND table_name = ?
+        LIMIT 1
+        """,
+        [catalog, schema, name],
+    ).fetchone()
+    return row is not None
+
+
+def _normalize_iceberg_type(type_name: str) -> str:
+    upper = type_name.strip().upper()
+    primitive = {
+        "BOOLEAN",
+        "TINYINT",
+        "SMALLINT",
+        "INTEGER",
+        "BIGINT",
+        "HUGEINT",
+        "REAL",
+        "DOUBLE",
+        "VARCHAR",
+        "DATE",
+        "TIMESTAMP",
+        "TIME",
+        "BLOB",
+    }
+    if upper in primitive:
+        return upper
+    if upper.startswith("DECIMAL("):
+        return upper
+    if "TIMESTAMP WITH TIME ZONE" in upper:
+        return "TIMESTAMP"
+    # Iceberg + DuckDB can reject some complex types during CREATE TABLE.
+    if any(token in upper for token in ("STRUCT", "MAP", "LIST", "ARRAY", "UNION", "JSON")):
+        return "VARCHAR"
+    return "VARCHAR"
+
+
+def _staged_schema_sql(glob: str) -> str:
+    glob_literal = _sql_escape(glob)
+    return (
+        "SELECT * EXCLUDE (filename), filename AS source_file, now() AS ingested_at "
+        f"FROM read_parquet('{glob_literal}', "
+        "hive_partitioning=true, filename=true, union_by_name=true)"
     )
 
 
@@ -155,39 +223,35 @@ def _ensure_schemas(con) -> None:
 
 
 def _create_raw_table(con, table: str, glob: str) -> None:
-    glob_literal = _sql_escape(glob)
-    con.execute(
-        f"""
-        CREATE TABLE IF NOT EXISTS {table} AS
-        SELECT
-            * EXCLUDE (filename),
-            filename AS source_file,
-            now() AS ingested_at
-        FROM read_parquet('{glob_literal}',
-            hive_partitioning=true,
-            filename=true,
-            union_by_name=true
-        )
-        LIMIT 0
-        """
-    )
+    if _table_exists(con, table):
+        return
+
+    schema_rows = con.execute(f"DESCRIBE {_staged_schema_sql(glob)} LIMIT 0").fetchall()
+    if not schema_rows:
+        raise RuntimeError(f"Unable to infer staged schema for {table} from {glob}")
+
+    seen: set[str] = set()
+    column_defs: list[str] = []
+    for row in schema_rows:
+        col_name = str(row[0])
+        if col_name in seen:
+            continue
+        seen.add(col_name)
+        col_type = _normalize_iceberg_type(str(row[1]))
+        column_defs.append(f"{_quote_ident(col_name)} {col_type}")
+
+    if not column_defs:
+        raise RuntimeError(f"No columns inferred for {table}")
+
+    con.execute(f"CREATE TABLE IF NOT EXISTS {table} ({', '.join(column_defs)})")
 
 
 def _load_dataset(con, spec: DatasetSpec) -> dict[str, Any]:
-    glob_literal = _sql_escape(spec.glob)
     dataset_literal = _sql_escape(spec.dataset)
     con.execute(
         f"""
         CREATE OR REPLACE TEMP VIEW staged_rows AS
-        SELECT
-            * EXCLUDE (filename),
-            filename AS source_file,
-            now() AS ingested_at
-        FROM read_parquet('{glob_literal}',
-            hive_partitioning=true,
-            filename=true,
-            union_by_name=true
-        )
+        {_staged_schema_sql(spec.glob)}
         """
     )
 
