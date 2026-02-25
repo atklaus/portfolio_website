@@ -105,9 +105,11 @@ async function proxyToApp(request, env, url) {
   upstream.pathname = url.pathname;
   upstream.search = url.search;
 
+  const hasBody = request.method !== "GET" && request.method !== "HEAD";
   const upstreamRequest = new Request(upstream.toString(), {
     method: request.method,
     headers: request.headers,
+    body: hasBody ? request.body : undefined,
     redirect: "manual",
   });
 
