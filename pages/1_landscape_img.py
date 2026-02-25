@@ -39,34 +39,39 @@ MODEL_DIR = ROOT_DIR / "projects" / "landscape_img" / "model"
 DATASET_SIZE_APPROX = 5000
 
 
-@st.cache_resource(show_spinner="Loading model...", ttl=43200)
+@st.cache_resource(show_spinner=False)
+def get_tf():
+    """Lazy-load TensorFlow only when inference needs it."""
+    import tensorflow as tf
+
+    return tf
+
+
+@st.cache_resource(show_spinner="Loading model...")
 def load_model():
     """Load and cache the TensorFlow model once per process."""
     log_mem("landscape_model_load:before")
-    from tensorflow import keras
-
-    model = keras.models.load_model(str(MODEL_DIR), compile=False)
+    tf = get_tf()
+    model = tf.keras.models.load_model(str(MODEL_DIR), compile=False)
     model.trainable = False
     log_mem("landscape_model_load:after")
     return model
 
 
-@st.cache_data(show_spinner=False, ttl=43200)
+@st.cache_data(show_spinner=False)
 def load_class_names() -> tuple[str, ...]:
     """Cache class names alongside model state for stable rendering."""
     return tuple(CLASS_NAMES)
 
 
-@st.cache_resource(show_spinner=False)
-def get_runtime_badge_text() -> str:
-    """Return a compact runtime badge for the hero section."""
-    try:
-        import tensorflow as tf
-
-        has_gpu = bool(tf.config.list_physical_devices("GPU"))
-        return "Local model | GPU inference" if has_gpu else "Local model | CPU inference"
-    except Exception:
-        return "Local model"
+def _hero_runtime_badge() -> str:
+    """Render a fast, no-import runtime badge for initial page load."""
+    backend = st.session_state.get("landscape_inference_backend", "CPU (stable)")
+    if backend == "GPU (experimental)":
+        return "Local model | GPU inference"
+    if backend == "Auto":
+        return "Local model | Auto backend"
+    return "Local model | CPU inference"
 
 
 def _card_container():
@@ -146,7 +151,7 @@ def _render_hero() -> None:
       <h1 class="landscape-title">Landscape Image Prediction</h1>
       <p class="landscape-subtitle">Trained on ~{DATASET_SIZE_APPROX:,} labeled images, predicts the scene category for uploaded photos.</p>
     </div>
-    <div class="landscape-pill">{get_runtime_badge_text()}</div>
+    <div class="landscape-pill">{_hero_runtime_badge()}</div>
   </div>
 </div>
         """,
@@ -205,13 +210,11 @@ def _run_inference(
     applied_backend = inference_backend
     batch_size = min(64, len(batch))
     if inference_backend == "CPU (stable)":
-        import tensorflow as tf
-
+        tf = get_tf()
         with tf.device("/CPU:0"):
             tile_probabilities = model.predict(batch, verbose=0, batch_size=batch_size)
     elif inference_backend == "GPU (experimental)":
-        import tensorflow as tf
-
+        tf = get_tf()
         try:
             with tf.device("/GPU:0"):
                 tile_probabilities = model.predict(batch, verbose=0, batch_size=batch_size)
@@ -314,6 +317,8 @@ with page_guard(os.path.basename(__file__)):
         st.session_state["landscape_last_backend"] = None
     if "landscape_compat_result" not in st.session_state:
         st.session_state["landscape_compat_result"] = None
+    if "landscape_inference_backend" not in st.session_state:
+        st.session_state["landscape_inference_backend"] = "CPU (stable)"
 
     left_col, right_col = st.columns([1.05, 0.95], gap="large")
 
