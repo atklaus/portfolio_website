@@ -4,9 +4,9 @@ I build data products that move from raw inputs to decisions. My focus is pragma
 
 ## Flagship Projects
 
-### WNBA Success Prediction
-Live ingestion from sports-reference.com, feature normalization, and model inference using cached artifacts. Emphasis on robust parsing, missing value handling, and fast interactive prediction.  
-![WNBA Success Prediction](../static/images/wnba_success/screenshot.svg)  
+### WNBA Elite Impact Projection
+Live ingestion from sports-reference.com, feature normalization, and model inference using cached artifacts to estimate top-tier WNBA career impact. Emphasis on robust parsing, missing value handling, and fast interactive prediction.  
+![WNBA Elite Impact Projection](../static/images/wnba_success/screenshot.svg)  
 Architecture diagram: `projects/wnba_success/README.md`  
 Offline mode: `projects/wnba_success/README.md`
 

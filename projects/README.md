@@ -14,7 +14,7 @@ Each project lives in its own folder under `projects/` and should be self-contai
 **Current Projects**
 - `bibclean/` — Bibliometrix reference cleaner.
 - `landscape_img/` — Landscape image classifier.
-- `wnba_success/` — WNBA success prediction.
+- `wnba_success/` — WNBA elite impact projection.
 - `ellipses/` — Random ellipse overlap simulator.
 - `game_of_life/` — Conway's Game of Life.
 - `happy_prime/` — Happy/sad + prime calculator.

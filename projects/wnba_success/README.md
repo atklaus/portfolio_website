@@ -1,10 +1,10 @@
-# WNBA Success Prediction
+# WNBA Elite Impact Projection
 
 ## Problem
-Estimate the likelihood of WNBA success for college players using publicly available NCAA statistics.
+Estimate the likelihood of elite WNBA career impact for college players using publicly available NCAA statistics.
 
 ## Screenshot
-![WNBA Success Prediction](../../static/images/wnba_success/screenshot.svg)
+![WNBA Elite Impact Projection](../../static/images/wnba_success/screenshot.svg)
 
 ## Architecture
 ```mermaid
@@ -32,7 +32,7 @@ graph TD
 - Feature coverage is limited to what is available on sports-reference.
 
 ## How To Run
-- Streamlit app: `poetry run streamlit run app.py` and open the WNBA Success card.
+- Streamlit app: `poetry run streamlit run app.py` and open the WNBA Elite Impact card.
 - Direct page: `poetry run streamlit run pages/2_wnba_success.py`
 
 ## Offline Mode

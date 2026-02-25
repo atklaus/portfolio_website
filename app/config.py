@@ -27,9 +27,9 @@ MOD_ACCESS = {
     }
 
     ,'wnba_success': {
-    'button' : '🏀 Predicting WNBA Success'
+    'button' : '🏀 WNBA Elite Impact'
     ,'name' : 'wnba_success'
-    ,'description':"Predict WNBA success from college stats with live scraping and a cached model."
+    ,'description':"Estimate elite WNBA career impact from college stats with live scraping and a cached model."
     ,'group': 'featured'
     ,'tags': ('Machine Learning', 'Classification', 'Data Pipeline', 'Web Scraping')
     }

@@ -1,7 +1,7 @@
 <svg width="1200" height="675" viewBox="0 0 1200 675" xmlns="http://www.w3.org/2000/svg">
   <rect width="1200" height="675" fill="#1b2626"/>
   <rect x="60" y="60" width="1080" height="555" rx="28" fill="#203635" stroke="#9be7d8" stroke-width="3"/>
-  <text x="120" y="170" font-size="46" fill="#e7f3f0" font-family="Arial, sans-serif">WNBA Success Prediction</text>
+  <text x="120" y="170" font-size="46" fill="#e7f3f0" font-family="Arial, sans-serif">WNBA Elite Impact Projection</text>
   <text x="120" y="230" font-size="24" fill="#a8c0bb" font-family="Arial, sans-serif">Screenshot placeholder</text>
   <rect x="120" y="280" width="960" height="260" rx="16" fill="#253b3b" stroke="#3f5a55" stroke-width="2"/>
   <text x="150" y="330" font-size="20" fill="#a8c0bb" font-family="Arial, sans-serif">Model inputs • live scrape • inference</text>

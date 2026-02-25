@@ -41,7 +41,7 @@ with page_guard(os.path.basename(__file__)):
 
     BASE_URL = 'https://www.sports-reference.com'
     SEASON_URL_TEMPLATE = 'https://www.sports-reference.com/cbb/seasons/women/{}-school-stats.html'
-    SELECTED_FEATURES = [
+    DISPLAY_FEATURES_FALLBACK = [
         "pg_fg%",
         "pg_2p%",
         "adv_efg%",
@@ -56,26 +56,34 @@ with page_guard(os.path.basename(__file__)):
     MODEL_FEATURES_FALLBACK = []
     FEATURE_NAME_MAP = {}
     COLLEGE_TEAM_ALIASES = {
-        "baylor": "college_team_Baylor",
-        "duke": "college_team_Duke",
-        "maryland": "college_team_Maryland",
-        "middletennessee": "college_team_Middle Tennessee",
-        "middletennesseestate": "college_team_Middle Tennessee",
-        "southcarolina": "college_team_South Carolina",
-        "tennessee": "college_team_Tennessee",
-        "uconn": "college_team_UConn",
-        "connecticut": "college_team_UConn",
+        "middletennesseestate": "Middle Tennessee",
+        "connecticut": "UConn",
     }
     CONFERENCE_ALIASES = {
-        "aac": "conference_AAC",
-        "acc": "conference_ACC",
-        "big12": "conference_Big 12",
-        "bigeast": "conference_Big East",
-        "bigten": "conference_Big Ten",
-        "maac": "conference_MAAC",
-        "pac10": "conference_Pac-10",
-        "pac12": "conference_Pac-12",
-        "sec": "conference_SEC",
+        "americanathleticconference": "AAC",
+        "atlanticcoastconference": "ACC",
+        "bigtwelve": "Big 12",
+        "big12conference": "Big 12",
+        "bigeastconference": "Big East",
+        "big10": "Big Ten",
+        "bigtenconference": "Big Ten",
+        "pac10conference": "Pac-10",
+        "pac12conference": "Pac-12",
+        "southeasternconference": "SEC",
+    }
+    AWARD_PATTERNS = {
+        "All_Freshman_count": ("all-freshman", "all freshman"),
+        "POY_count": ("player of the year", " poy "),
+        "NCAA_Champion_count": ("ncaa champion", "national champion"),
+        "NCAA_All_Tourney_count": ("ncaa all-tournament", "all-tournament"),
+        "NCAA_All_Region_count": ("ncaa all-region", "all-region"),
+        "Naismith_count": ("naismith",),
+        "AP_count": ("associated press", " ap ", "ap all", "all-american"),
+        "ROY_count": ("rookie of the year", " roy "),
+        "DPOY_count": ("defensive player of the year", " dpoy "),
+        "All_Defense_count": ("all-defensive", "all defense"),
+        "MOP_count": ("most outstanding player", " mop "),
+        "MIP_count": ("most improved player", " mip "),
     }
     DEFAULT_HEADERS = {
         "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
@@ -85,6 +93,27 @@ with page_guard(os.path.basename(__file__)):
         "Connection": "keep-alive",
         "Upgrade-Insecure-Requests": "1",
         "DNT": "1",
+    }
+    MODEL_METADATA = {
+        "success_cutoff": 22.425,
+        "success_cutoff_label": "22.425 Win Shares (Top Quartile)",
+        "success_definition": (
+            "Elite is defined as reaching the top quartile of WNBA career Win Shares "
+            "(≥ 22.425), representing sustained professional impact."
+        ),
+        "model_name": "Logistic Regression",
+        "feature_cap": 20,
+        "selection_method": "Cross-validated model search by ROC-AUC",
+        "holdout_metrics": {
+            "roc_auc": 0.945,
+            "accuracy": 0.888,
+            "precision": 0.857,
+            "recall": 0.667,
+        },
+        "leakage_note": (
+            "Pro-only outcome fields (including Win Share outcome variants) are excluded "
+            "from model inputs."
+        ),
     }
 
     @st.cache_data(ttl=3600, max_entries=2, show_spinner=False)
@@ -166,13 +195,19 @@ with page_guard(os.path.basename(__file__)):
         #     loaded_model = pickle.load(model_file)
         return loaded_model
 
-    def _load_feature_schema():
+    def _load_feature_schema_data():
         if not os.path.exists(FEATURE_SCHEMA_PATH):
             return None
         try:
             with open(FEATURE_SCHEMA_PATH, "r") as handle:
                 data = json.load(handle)
         except (OSError, json.JSONDecodeError):
+            return None
+        return data
+
+    def _load_feature_schema():
+        data = _load_feature_schema_data()
+        if data is None:
             return None
         if isinstance(data, list):
             return [str(item) for item in data]
@@ -181,6 +216,16 @@ with page_guard(os.path.basename(__file__)):
                 if key in data and isinstance(data[key], list):
                     return [str(item) for item in data[key]]
         return None
+
+    def _dedupe_keep_order(values):
+        seen = set()
+        result = []
+        for value in values:
+            if value in seen:
+                continue
+            seen.add(value)
+            result.append(value)
+        return result
 
     def get_model_feature_names(model):
         if hasattr(model, "named_steps") and "preprocess" in model.named_steps:
@@ -213,6 +258,57 @@ with page_guard(os.path.basename(__file__)):
                 return list(step.feature_names_in_)
         return list(MODEL_FEATURES_FALLBACK)
 
+    def get_display_feature_names(model, raw_feature_cols):
+        if hasattr(model, "named_steps"):
+            preprocess = model.named_steps.get("preprocess")
+            selector = model.named_steps.get("feature_select")
+            if (
+                preprocess is not None
+                and selector is not None
+                and hasattr(preprocess, "get_feature_names_out")
+                and hasattr(selector, "get_support")
+            ):
+                try:
+                    transformed_names = list(preprocess.get_feature_names_out())
+                    support_mask = selector.get_support()
+                    if len(transformed_names) == len(support_mask):
+                        selected = [
+                            _strip_feature_prefix(name)
+                            for name, selected_flag in zip(transformed_names, support_mask)
+                            if selected_flag
+                        ]
+                        selected = _dedupe_keep_order(selected)
+                        if selected:
+                            return selected
+                except Exception:
+                    pass
+
+        schema = _load_feature_schema_data()
+        if isinstance(schema, dict) and isinstance(schema.get("selected_features"), list):
+            selected = [_strip_feature_prefix(str(name)) for name in schema["selected_features"]]
+            selected = _dedupe_keep_order(selected)
+            if selected:
+                return selected
+
+        fallback = [col for col in DISPLAY_FEATURES_FALLBACK if col in raw_feature_cols]
+        if fallback:
+            return fallback
+        return list(raw_feature_cols[:10])
+
+    def get_success_label():
+        schema = _load_feature_schema_data()
+        if not isinstance(schema, dict):
+            return "model-defined elite impact"
+        meta = schema.get("target_metadata", {})
+        source_col = meta.get("career_win_shares_source_column")
+        threshold = meta.get("threshold")
+        if source_col and threshold is not None:
+            return f"{source_col} >= {threshold:.2f}"
+        target_name = meta.get("target_column") or schema.get("target")
+        if target_name:
+            return str(target_name)
+        return "model-defined elite impact"
+
     def _strip_feature_prefix(name: str) -> str:
         if "__" in name:
             return name.split("__", 1)[1]
@@ -230,6 +326,54 @@ with page_guard(os.path.basename(__file__)):
     def _set_one_hot(model_input, col_name):
         if col_name and col_name in model_input.columns:
             model_input[col_name] = 1
+
+    def _find_one_hot_column(columns, prefix, value):
+        normalized_value = _normalize_text(value)
+        if not normalized_value:
+            return None
+        for col in columns:
+            if not str(col).startswith(prefix):
+                continue
+            suffix = str(col)[len(prefix) :]
+            if _normalize_text(suffix) == normalized_value:
+                return col
+        return None
+
+    def _extract_award_items(page_html):
+        awards_list = page_html.find("ul", id="bling")
+        if awards_list is None:
+            return []
+        return [li.get_text(" ", strip=True) for li in awards_list.find_all("li")]
+
+    def _award_item_weight(text):
+        if not text:
+            return 0
+        years = re.findall(r"\b(?:19|20)\d{2}\b", text)
+        if years:
+            return len(years)
+        for pattern in (r"(?:x|×)\s*(\d+)", r"(\d+)\s*time"):
+            match = re.search(pattern, text, flags=re.IGNORECASE)
+            if match:
+                try:
+                    return max(int(match.group(1)), 1)
+                except (TypeError, ValueError):
+                    pass
+        return 1
+
+    def _award_feature_counts(award_items):
+        feature_counts = {feature: 0 for feature in AWARD_PATTERNS}
+        total_awards = 0
+        for raw_item in award_items:
+            text = f" {str(raw_item).lower()} "
+            weight = _award_item_weight(text)
+            if weight <= 0:
+                continue
+            total_awards += weight
+            for feature_name, patterns in AWARD_PATTERNS.items():
+                if any(pattern in text for pattern in patterns):
+                    feature_counts[feature_name] += weight
+        feature_counts["award_count"] = total_awards
+        return feature_counts
 
     def _normalize_team_name(name):
         if name is None:
@@ -557,9 +701,16 @@ with page_guard(os.path.basename(__file__)):
         college_value = search_dict.get("college") if search_dict else None
         if college_value:
             normalized_college = _normalize_text(college_value)
-            college_col = COLLEGE_TEAM_ALIASES.get(normalized_college)
-            if college_col and college_col in model_input.columns:
-                model_input[college_col] = 1
+            college_col = _find_one_hot_column(
+                model_input.columns, "college_team_", college_value
+            )
+            if college_col is None:
+                college_alias = COLLEGE_TEAM_ALIASES.get(normalized_college)
+                if college_alias:
+                    college_col = _find_one_hot_column(
+                        model_input.columns, "college_team_", college_alias
+                    )
+            _set_one_hot(model_input, college_col)
 
         conf_value = None
         for col in ("pg_conf", "adv_conf", "tot_conf"):
@@ -568,27 +719,128 @@ with page_guard(os.path.basename(__file__)):
                 break
         if conf_value:
             normalized_conf = _normalize_text(conf_value)
-            conf_col = CONFERENCE_ALIASES.get(normalized_conf)
-            if conf_col and conf_col in model_input.columns:
-                model_input[conf_col] = 1
+            conf_col = _find_one_hot_column(model_input.columns, "conference_", conf_value)
+            if conf_col is None:
+                conf_alias = CONFERENCE_ALIASES.get(normalized_conf)
+                if conf_alias:
+                    conf_col = _find_one_hot_column(
+                        model_input.columns, "conference_", conf_alias
+                    )
+            _set_one_hot(model_input, conf_col)
 
         for col in model_input.columns:
             if col.startswith("college_team_") or col.startswith("conference_"):
                 model_input[col] = model_input[col].fillna(0)
         model_input = model_input.apply(pd.to_numeric, errors="coerce")
 
-        display_missing = [col for col in SELECTED_FEATURES if col not in model_input.columns]
-        if display_missing:
+        display_target_cols = get_display_feature_names(model, raw_feature_cols)
+        display_cols = [col for col in display_target_cols if col in model_input.columns]
+        if not display_cols:
             st.error(
-                "Missing required stats for prediction: "
-                + ", ".join(display_missing)
-                + ". The Sports-Reference page may not include these columns."
+                "No feature columns available for display. "
+                "Check feature schema and model artifact compatibility."
             )
             return None, None, None, None
-
-        display_cols = [col for col in SELECTED_FEATURES if col in model_input.columns]
         display_df = model_input[display_cols].copy()
         return model_input, display_df, display_cols, raw_feature_cols
+
+    def _confidence_band(probability: float) -> str:
+        if probability < 0.40:
+            return "Low"
+        if probability <= 0.70:
+            return "Medium"
+        return "High"
+
+    def _score_with_feature_names(model, model_input):
+        if not hasattr(model, "named_steps"):
+            return None, None, None
+        preprocess = model.named_steps.get("preprocess")
+        estimator = model.named_steps.get("model")
+        if preprocess is None or estimator is None:
+            return None, None, None
+        if not hasattr(preprocess, "transform") or not hasattr(estimator, "coef_"):
+            return None, None, None
+        try:
+            transformed = preprocess.transform(model_input)
+            feature_names = (
+                list(preprocess.get_feature_names_out())
+                if hasattr(preprocess, "get_feature_names_out")
+                else []
+            )
+            selector = model.named_steps.get("feature_select")
+            if selector is not None and hasattr(selector, "get_support"):
+                support = selector.get_support()
+                if feature_names and len(feature_names) == len(support):
+                    feature_names = [name for name, keep in zip(feature_names, support) if keep]
+                transformed = selector.transform(transformed)
+            if hasattr(transformed, "toarray"):
+                transformed = transformed.toarray()
+            transformed = np.asarray(transformed)
+            if transformed.ndim != 2 or transformed.shape[0] == 0:
+                return None, None, None
+            if not feature_names:
+                feature_names = [f"feature_{idx}" for idx in range(transformed.shape[1])]
+            coefs = np.asarray(estimator.coef_)[0]
+            if len(feature_names) != len(coefs) or transformed.shape[1] != len(coefs):
+                return None, None, None
+            return transformed[0], coefs, feature_names
+        except Exception:
+            return None, None, None
+
+    def get_player_feature_contributions(model, model_input, top_n=8):
+        values, coefs, feature_names = _score_with_feature_names(model, model_input)
+        if values is None:
+            return None
+        contributions = values * coefs
+        contrib_df = pd.DataFrame(
+            {
+                "feature": [_strip_feature_prefix(str(name)) for name in feature_names],
+                "contribution": contributions,
+                "coef": coefs,
+                "feature_value": values,
+            }
+        )
+        positive = contrib_df[contrib_df["contribution"] > 0].sort_values(
+            "contribution", ascending=False
+        )
+        negative = contrib_df[contrib_df["contribution"] < 0].sort_values("contribution")
+        if positive.empty and negative.empty:
+            return None
+        return {
+            "mode": "player_specific",
+            "positive": positive.head(top_n).reset_index(drop=True),
+            "negative": negative.head(top_n).reset_index(drop=True),
+        }
+
+    def get_global_top_coefficients(model, top_n=10):
+        if not hasattr(model, "named_steps"):
+            return None
+        preprocess = model.named_steps.get("preprocess")
+        estimator = model.named_steps.get("model")
+        if preprocess is None or estimator is None or not hasattr(estimator, "coef_"):
+            return None
+        feature_names = (
+            list(preprocess.get_feature_names_out())
+            if hasattr(preprocess, "get_feature_names_out")
+            else []
+        )
+        selector = model.named_steps.get("feature_select")
+        if selector is not None and hasattr(selector, "get_support") and feature_names:
+            support = selector.get_support()
+            if len(feature_names) == len(support):
+                feature_names = [name for name, keep in zip(feature_names, support) if keep]
+        coefs = np.asarray(estimator.coef_)[0]
+        if not feature_names or len(feature_names) != len(coefs):
+            feature_names = [f"feature_{idx}" for idx in range(len(coefs))]
+        coef_df = pd.DataFrame(
+            {
+                "feature": [_strip_feature_prefix(str(name)) for name in feature_names],
+                "coef": coefs,
+            }
+        )
+        coef_df["abs_coef"] = coef_df["coef"].abs()
+        coef_df = coef_df.sort_values("abs_coef", ascending=False).head(top_n)
+        return coef_df[["feature", "coef"]].reset_index(drop=True)
 
 
     # Load the model from the file
@@ -704,6 +956,8 @@ with page_guard(os.path.basename(__file__)):
 
 
         page_html = BeautifulSoup(response.text, 'html5lib')
+        award_items = _extract_award_items(page_html)
+        award_feature_counts = _award_feature_counts(award_items)
         awards,name,position,height = utils.extract_details_from_page(page_html)
 
         div_class = page_html.findAll('h1')
@@ -753,6 +1007,8 @@ with page_guard(os.path.basename(__file__)):
         base_df['position'] =position
         base_df['height'] =height
         base_df['awards'] =awards
+        for award_feature, award_value in award_feature_counts.items():
+            base_df[award_feature] = award_value
         # base_df.to_csv('ncaa_ref/' + player_name + '.csv')
         base_df = prep_df(base_df)
 
@@ -771,70 +1027,31 @@ with page_guard(os.path.basename(__file__)):
 
     import base64
 
-    # Your existing imports and code here...
+    @st.cache_data(show_spinner=False, max_entries=4)
+    def load_pdf_bytes(file_path: str) -> bytes:
+        log_mem("wnba_pdf_download:before")
+        with open(file_path, "rb") as handle:
+            data = handle.read()
+        log_mem("wnba_pdf_download:after")
+        return data
 
-    # Function to display PDF within Streamlit app
-    def displayPDF(file):
-        # Opening file from file path
-        log_mem("wnba_pdf:before")
-        with open(file, "rb") as f:
-            base64_pdf = base64.b64encode(f.read()).decode('utf-8')
-        log_mem("wnba_pdf:after")
+    # UI refactor note: page presentation is split into render_* functions while keeping
+    # existing scrape/build/predict behavior unchanged.
+    def render_header():
+        page_header(
+            "WNBA Elite Impact Projection",
+            page_name=os.path.basename(__file__),
+        )
+        st.caption(
+            "Given an NCAA season and player, estimate likelihood they will reach elite WNBA "
+            "career impact measured by top-quartile Win Shares."
+        )
 
-        # Embedding PDF in HTML
-        pdf_display = f'<embed src="data:application/pdf;base64,{base64_pdf}" width=100% height="500" type="application/pdf">'
-
-        # Displaying File
-        st.markdown(pdf_display, unsafe_allow_html=True)
-
-    # Add this function to display the detailed context of your paper
-    def display_paper_context():
-        with st.expander("Learn more about the predictive model and it's background"):
-            st.info(
-                "Note: The predictive model has been updated since the paper was published. "
-                "Results shown here reflect the newer model and may differ from the paper."
-            )
-
-            # pdf_path = "static/files/Predicting_WNBA_Success.pdf"
-            # pdf_base64 = utils.get_pdf_base64(pdf_path)
-
-            # st.markdown(
-            #     f'<p style="text-align: center;"><a href="data:application/pdf;base64,{pdf_base64}" download="Predicting_WNBA_Success.pdf" target="_blank">Download Paper</a></p>',
-            #     unsafe_allow_html=True
-            # )
-
-
-            pdf_path = PDF_PATH
-
-            log_mem("wnba_pdf_download:before")
-            with open(pdf_path, "rb") as f:
-                pdf_bytes = f.read()
-            log_mem("wnba_pdf_download:after")
-
-            st.download_button(
-                label="Download Paper",
-                data=pdf_bytes,
-                file_name="Predicting_WNBA_Success.pdf",
-                mime="application/pdf",
-                key='submit_wnba_download'
-            )
-
-
-            # Display the PDF using the function
-            file_path = PDF_PATH
-
-            displayPDF(file_path)
-
-
-    # Your existing code for page_header and other parts...
-    page_header('Predicting WNBA Player Success',page_name=os.path.basename(__file__))
-
-
-    stu.V_SPACE(1)
-
-    st.subheader('Predicting WNBA Success from College Performance')
-    st.write("This page provides insights into WNBA players' success, leveraging predictive modeling based on college performance.")
-
+    def _card_container():
+        try:
+            return st.container(border=True)
+        except TypeError:
+            return st.container()
 
     @st.cache_data(ttl=42300, max_entries=50, show_spinner=False)
     def get_team_urls(year=2023):
@@ -890,11 +1107,338 @@ with page_guard(os.path.basename(__file__)):
             _enable_offline(f"Network unavailable: {exc}")
             return _get_offline_team_sos(college)
 
+    def render_controls():
+        search_dict = {}
+        with _card_container():
+            st.markdown("#### Player Selection")
+            c1, c2, c3 = st.columns(3)
+            with c1:
+                current_year = datetime.datetime.now().year
+                if _is_offline_mode():
+                    seasons = _get_offline_seasons() or [current_year]
+                else:
+                    seasons = list(range(current_year - 19, current_year + 1))
+                    seasons.sort(reverse=True)
+                search_dict["season"] = st.selectbox(
+                    "Season",
+                    options=seasons,
+                    key="wnba_season",
+                )
 
-    test= get_team_urls_safe()
-    if not test:
-        st.error("No team data available. Check your network connection or offline fixtures.")
-        st.stop()
+            team_urls = get_team_urls_safe(search_dict["season"])
+            if not team_urls:
+                st.error("No team data available. Check network access or offline fixtures.")
+                st.stop()
+            colleges = sorted(team_urls.keys())
+
+            with c2:
+                search_dict["college"] = st.selectbox(
+                    "College",
+                    options=colleges,
+                    key="wnba_college",
+                )
+
+            search_dict["team_url"] = team_urls[search_dict["college"]]
+            player_dict = get_player_urls_safe(search_dict["team_url"], search_dict["college"])
+            if not player_dict:
+                st.error("No player data available for this team. Check fixtures or network.")
+                st.stop()
+            players = sorted(player_dict.keys())
+
+            with c3:
+                search_dict["player"] = st.selectbox(
+                    "Player",
+                    options=players,
+                    key="wnba_player",
+                )
+            search_dict["player_url"] = player_dict[search_dict["player"]]
+
+            b1, b2 = st.columns([1, 2])
+            with b1:
+                predict_clicked = st.button(
+                    "Estimate Elite Potential", type="primary", key="wnba_predict"
+                )
+            with b2:
+                st.caption("How to interpret: see the “How it works” section below this result.")
+
+        return search_dict, predict_clicked
+
+    def _safe_probability(model, model_input):
+        if hasattr(model, "predict_proba"):
+            try:
+                return float(model.predict_proba(model_input)[0, 1])
+            except Exception:
+                pass
+        if hasattr(model, "decision_function"):
+            try:
+                score = float(model.decision_function(model_input)[0])
+                return float(1.0 / (1.0 + np.exp(-score)))
+            except Exception:
+                pass
+        return None
+
+    def run_prediction(search_dict):
+        with st.spinner("Running model..."):
+            log_mem("wnba_predict:before_data")
+            base_df = get_player_df(search_dict)
+            log_mem("wnba_predict:after_data")
+            if base_df is None or base_df.empty:
+                return None
+
+            log_mem("wnba_predict:before_model")
+            model = init_model()
+            log_mem("wnba_predict:after_model")
+            model_input, display_df, display_cols, model_cols = build_model_input(
+                base_df, model, search_dict
+            )
+            if model_input is None:
+                return None
+
+            predicted_value = int(model.predict(model_input)[0])
+            probability = _safe_probability(model, model_input)
+            if probability is None:
+                probability = 0.65 if predicted_value == 1 else 0.35
+
+            attribution = get_player_feature_contributions(model, model_input, top_n=8)
+            if attribution is None:
+                global_coef = get_global_top_coefficients(model, top_n=10)
+                attribution = (
+                    {"mode": "global", "global": global_coef}
+                    if global_coef is not None
+                    else {"mode": "unavailable"}
+                )
+
+            validation_df = pd.DataFrame(
+                {"feature": display_cols, "raw_value": display_df.iloc[0].values}
+            )
+            st.session_state["validation_df"] = validation_df
+            st.session_state["validation_meta"] = {
+                "model_features": len(model_cols),
+                "used_features": len(display_cols),
+            }
+
+            return {
+                "player_name": str(base_df["player_name"].iloc[0]),
+                "inputs": search_dict.copy(),
+                "predicted_value": predicted_value,
+                "probability": float(probability),
+                "confidence_band": _confidence_band(float(probability)),
+                "display_df": display_df,
+                "display_cols": display_cols,
+                "attribution": attribution,
+            }
+
+    def _contribution_table(df: pd.DataFrame, descending=True):
+        table = df.copy()
+        table = table.sort_values("contribution", ascending=not descending)
+        max_abs = float(table["contribution"].abs().max()) if not table.empty else 0.0
+        if max_abs <= 0:
+            table["impact"] = ""
+        else:
+            table["impact"] = table["contribution"].apply(
+                lambda v: ("+" if v >= 0 else "-")
+                + ("#" * max(1, int(round((abs(v) / max_abs) * 12))))
+            )
+        table["contribution"] = table["contribution"].map(lambda v: round(float(v), 3))
+        table["feature_value"] = table["feature_value"].map(lambda v: round(float(v), 3))
+        table["coef"] = table["coef"].map(lambda v: round(float(v), 3))
+        return table[["feature", "impact", "contribution", "feature_value", "coef"]]
+
+    def render_prediction(result):
+        with _card_container():
+            st.markdown("### Prediction")
+            st.markdown(
+                f"## Estimated Elite Impact Likelihood: {result['probability']:.0%}"
+            )
+            st.progress(int(max(0.0, min(1.0, result["probability"])) * 100))
+
+            pcol1, pcol2, pcol3 = st.columns([1, 1, 2])
+            pcol1.metric("Player", result["player_name"])
+            pcol2.metric("Confidence band", result["confidence_band"])
+            pcol3.metric(
+                "Elite label",
+                "Elite Tier" if result["predicted_value"] == 1 else "Not Elite Tier",
+            )
+
+            st.info(
+                "This estimate is based on college-era features only. "
+                f"{MODEL_METADATA['success_definition']} "
+                "Use the output as a probabilistic signal, not a guarantee."
+            )
+
+            st.caption(
+                f"Last run: {result['inputs']['season']} • {result['inputs']['college']} • "
+                f"{result['inputs']['player']}"
+            )
+
+            with st.expander("Features used for this prediction", expanded=False):
+                st.dataframe(result["display_df"], hide_index=True, use_container_width=True)
+
+            with st.expander("What drove this prediction?", expanded=False):
+                attr = result.get("attribution", {})
+                if attr.get("mode") == "player_specific":
+                    st.caption(
+                        "Player-specific contribution view (using transformed features): contribution = coefficient × feature value."
+                    )
+                    left, right = st.columns(2)
+                    with left:
+                        st.markdown("**Top Positive Contributors**")
+                        st.dataframe(
+                            _contribution_table(attr["positive"], descending=True),
+                            hide_index=True,
+                            use_container_width=True,
+                        )
+                    with right:
+                        st.markdown("**Top Negative Contributors**")
+                        st.dataframe(
+                            _contribution_table(attr["negative"], descending=False),
+                            hide_index=True,
+                            use_container_width=True,
+                        )
+                elif attr.get("mode") == "global" and attr.get("global") is not None:
+                    st.caption(
+                        "Player-specific attribution is unavailable for this run; showing global coefficient magnitude instead."
+                    )
+                    st.dataframe(attr["global"], hide_index=True, use_container_width=True)
+                else:
+                    st.caption("Feature attribution is unavailable for the current model artifact.")
+
+    def render_paper_tab():
+        st.info(
+            "The app's model may be updated from the version described in the paper."
+        )
+        st.write(
+            "The paper documents the original problem framing, feature design choices, and "
+            "evaluation approach used in early iterations of this project."
+        )
+        st.write(
+            "Use it for methodology context; the live app reflects the current deployed model artifact."
+        )
+
+        pdf_bytes = load_pdf_bytes(PDF_PATH)
+        st.download_button(
+            label="Download Paper",
+            data=pdf_bytes,
+            file_name="Predicting_WNBA_Success.pdf",
+            mime="application/pdf",
+            key="submit_wnba_download",
+        )
+
+        log_mem("wnba_pdf:before")
+        encoded_pdf = base64.b64encode(pdf_bytes).decode("utf-8")
+        log_mem("wnba_pdf:after")
+        st.markdown(
+            f'<embed src="data:application/pdf;base64,{encoded_pdf}" width="100%" height="560" type="application/pdf">',
+            unsafe_allow_html=True,
+        )
+
+    def render_model_tabs():
+        tab_how, tab_data, tab_perf, tab_faq, tab_paper = st.tabs(
+            ["How it works", "Data + Leakage", "Model Performance", "FAQ", "Paper"]
+        )
+
+        with tab_how:
+            st.markdown("1. Choose a season, college, and player (NCAA context).")
+            st.markdown("2. Build that player's NCAA feature vector from scraped stats/context.")
+            st.markdown("3. Apply training-time preprocessing: missing-value handling, scaling, and one-hot encoding.")
+            st.markdown("4. Keep the 20 most informative features from the selected feature set.")
+            st.markdown("5. Run the trained model to estimate elite impact likelihood.")
+            st.markdown("**What this is**")
+            st.markdown("- A statistical estimate based on historical NCAA-to-WNBA patterns.")
+            st.markdown(
+                "- A comparison tool for pre-pro profiles under a consistent elite impact tier definition."
+            )
+            st.markdown("**What this isn't**")
+            st.markdown("- Not a scouting report or medical projection.")
+            st.markdown("- Not a guarantee of future outcomes for any single player.")
+
+        with tab_data:
+            st.write(
+                "Training data links historical NCAA player profiles to eventual WNBA outcomes."
+            )
+            st.write(
+                "Inputs are pre-pro features: college performance and context (conference, team, position, and related profile fields)."
+            )
+            st.write(MODEL_METADATA["leakage_note"])
+            st.warning(
+                "Not a guarantee: this is a statistical estimate from historical patterns."
+            )
+
+        with tab_perf:
+            perf = MODEL_METADATA["holdout_metrics"]
+            snap1, snap2 = st.columns(2)
+            snap1.metric("Elite impact cutoff", f"{MODEL_METADATA['success_cutoff']:.3f}")
+            snap1.caption("Win Shares (Top Quartile)")
+            snap2.metric("Model", MODEL_METADATA["model_name"])
+            snap3, snap4 = st.columns(2)
+            snap3.metric("ROC-AUC", f"{perf['roc_auc']:.3f}")
+            snap4.metric("Features", f"{MODEL_METADATA['feature_cap']}")
+            snap4.caption("Selected")
+            pc1, pc2, pc3 = st.columns(3)
+            pc1.metric("Accuracy", f"{perf['accuracy']:.3f}")
+            pc2.metric("Precision", f"{perf['precision']:.3f}")
+            pc3.metric("Recall", f"{perf['recall']:.3f}")
+            st.caption(
+                "Recall is lower than precision because with class imbalance and a fixed classification threshold, "
+                "the model is more conservative in calling positives."
+            )
+            st.caption(
+                "Model selection used cross-validated search across model families and selected the best ROC-AUC."
+            )
+            st.caption(
+                f"Latest retrain uses a {MODEL_METADATA['feature_cap']}-feature cap and selected "
+                f"{MODEL_METADATA['model_name']}."
+            )
+
+        with tab_faq:
+            faq_items = [
+                (
+                    "What does ‘Elite Career Impact’ mean?",
+                    "This model estimates the likelihood a player reaches the top quartile of WNBA career Win Shares "
+                    "(currently ≥ 22.425). That threshold represents sustained, high-level professional impact, not "
+                    "whether someone is ‘successful’ at basketball.",
+                ),
+                (
+                    "Why only college-era features?",
+                    "The model uses only pre-pro information (college performance and context like team, conference, "
+                    "and position). Pro-career outcome fields, including Win Shares, are excluded from the inputs to "
+                    "keep the prediction forward-looking.",
+                ),
+                (
+                    "How should I interpret the probability?",
+                    "A 70% estimate means that, historically, players with similar college profiles reached "
+                    "top-quartile WNBA career impact about 70% of the time. It’s a statistical estimate, not a guarantee.",
+                ),
+                (
+                    "How good is the model?",
+                    "On a held-out evaluation set, the current retrained model (logistic regression, 20 selected "
+                    "features) reports:\n"
+                    "• ROC-AUC: 0.945\n"
+                    "• Accuracy: 0.888\n"
+                    "• Precision: 0.857\n"
+                    "• Recall: 0.667",
+                ),
+                (
+                    "Why not call this ‘success’?",
+                    "Making the WNBA is already an achievement. This model is specifically about the likelihood of "
+                    "reaching an elite tier of career impact, not judging whether someone is ‘successful’.",
+                ),
+            ]
+            for question, answer in faq_items:
+                with st.expander(question):
+                    st.write(answer)
+
+        with tab_paper:
+            render_paper_tab()
+
+    if "validation_df" not in st.session_state:
+        st.session_state["validation_df"] = None
+    if "validation_meta" not in st.session_state:
+        st.session_state["validation_meta"] = None
+    if "wnba_prediction_result" not in st.session_state:
+        st.session_state["wnba_prediction_result"] = None
+
+    render_header()
 
     if _is_offline_mode():
         reason = st.session_state.get("wnba_offline_reason")
@@ -902,50 +1446,9 @@ with page_guard(os.path.basename(__file__)):
         if reason:
             st.caption(reason)
         st.caption("Set WNBA_OFFLINE=1 to force offline mode.")
-    college_list = list(test.keys())
-    college_list.sort()
 
-    search_dict = {}
-    col1, col2, col3, col4, col5 = st.columns([1, 1, 1, 1, 1])
-
-    with col1:
-        current_year = datetime.datetime.now().year
-        if _is_offline_mode():
-            past_20_years = _get_offline_seasons() or [current_year]
-        else:
-            past_20_years = list(range(current_year - 19, current_year + 1))
-            past_20_years.sort(reverse=True)
-        search_dict["season"] = st.selectbox(
-            label="Select Season", options=past_20_years, key="wnba_season"
-        )
-
-    with col2:
-        search_dict["college"] = st.selectbox(
-            label="Select College", options=college_list, key="wnba_college"
-        )
-
-    with col3:
-        test = get_team_urls_safe(search_dict["season"])
-        search_dict["team_url"] = test[search_dict["college"]]
-        player_dict = get_player_urls_safe(search_dict["team_url"], search_dict["college"])
-        if not player_dict:
-            st.error("No player data available for this team. Check fixtures or network.")
-            st.stop()
-        player_list = list(player_dict)
-        player_list.sort()
-        search_dict["player"] = st.selectbox(
-            label="Select Player", options=player_list, key="wnba_player"
-        )
-        search_dict["player_url"] = player_dict[search_dict["player"]]
-
-    search = st.button("Predict Success", type="primary")
-
-    if "validation_df" not in st.session_state:
-        st.session_state["validation_df"] = None
-    if "validation_meta" not in st.session_state:
-        st.session_state["validation_meta"] = None
-
-    if search:
+    search_dict, predict_clicked = render_controls()
+    if predict_clicked:
         inputs = {
             "season": search_dict.get("season"),
             "college": search_dict.get("college"),
@@ -962,89 +1465,12 @@ with page_guard(os.path.basename(__file__)):
             )
         except Exception:
             pass
-        with st.spinner("Running model..."):
-            log_mem("wnba_predict:before_data")
-            base_df = get_player_df(search_dict)
-            log_mem("wnba_predict:after_data")
-            if base_df is None or base_df.empty:
-                st.stop()
+        prediction_result = run_prediction(search_dict)
+        if prediction_result is not None:
+            st.session_state["wnba_prediction_result"] = prediction_result
 
-            log_mem("wnba_predict:before_model")
-            model = init_model()
-            log_mem("wnba_predict:after_model")
-            model_input, display_df, display_cols, model_cols = build_model_input(
-                base_df, model, search_dict
-            )
-            if model_input is None:
-                st.stop()
-
-            st.markdown("Features used in Prediction")
-            st.dataframe(
-                display_df,
-                column_config={
-                    "pg_fg%": st.column_config.NumberColumn(
-                        label="Field Goal Percentage", format="%.2f %%"
-                    ),
-                    "pg_2p%": st.column_config.NumberColumn(
-                        label="2-Point Field Goal Percentage", format="%.2f %%"
-                    ),
-                    "adv_efg%": st.column_config.NumberColumn(
-                        label="Effective FG Percentage", format="%.2f %%"
-                    ),
-                    "adv_ftr": st.column_config.NumberColumn(
-                        label="Free Throw Rate", format="%.2f"
-                    ),
-                    "adv_drb%": st.column_config.NumberColumn(
-                        label="Defensive Rebound Percentage", format="%.2f %%"
-                    ),
-                    "adv_obpm": st.column_config.NumberColumn(
-                        label="Offensive BPM", format="%.2f"
-                    ),
-                    "adv_bpm": st.column_config.NumberColumn(
-                        label="Box Plus/Minus", format="%.2f"
-                    ),
-                    "tot_fg%": st.column_config.NumberColumn(
-                        label="Total FG Percentage", format="%.2f %%"
-                    ),
-                    "tot_2p%": st.column_config.NumberColumn(
-                        label="Total 2P Percentage", format="%.2f %%"
-                    ),
-                    "tot_blk": st.column_config.NumberColumn(
-                        label="Total Blocks", format="%.0f"
-                    ),
-                },
-                hide_index=True,
-            )
-
-            validation_df = pd.DataFrame(
-                {"feature": display_cols, "raw_value": display_df.iloc[0].values}
-            )
-            st.session_state["validation_df"] = validation_df
-            st.session_state["validation_meta"] = {
-                "model_features": len(model_cols),
-                "used_features": len(display_cols),
-            }
-
-            predicted_values = model.predict(model_input)
-            prob_values = model.predict_proba(model_input)
-            pred_df = base_df[["player_name"]].copy()
-            pred_df["Predicted_Value"] = predicted_values
-            pred_df["Probability_Pos"]  = prob_values[:,1]
-            pred_df["Probability_Neg"]  = prob_values[:,0]
-            pred_df.sort_values(by=['Probability_Pos'],ascending=False,inplace=True)
-            player_name = base_df["player_name"].iloc[0]
-            pred_prob = '{:.1%}'.format(pred_df["Probability_Pos"].iloc[0])
-            result = """
-            **{player_name}** predicted probability of being successful in the WNBA (Win Shares > 0):
-
-            **{pred_prob}**
-            """.format(player_name=player_name, pred_prob=pred_prob)
-
-            st.info(result)
+    if st.session_state["wnba_prediction_result"] is not None:
+        render_prediction(st.session_state["wnba_prediction_result"])
 
     stu.V_SPACE(1)
-
-
-
-    # Call the function to display the paper context
-    display_paper_context()
+    render_model_tabs()

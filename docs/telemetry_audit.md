@@ -12,7 +12,7 @@ Active page entrypoints:
 - `shared/telemetry/telemetry.py:instrument_page`
 - `shared/telemetry/telemetry.py:log_event`
 - `shared/telemetry/telemetry.py:track_submission`
-- `pages/2_wnba_success.py` calls `track_submission(...)` at the submit button (`Predict Success`).
+- `pages/2_wnba_success.py` calls `track_submission(...)` at the submit button (`Estimate Elite Potential`).
 
 Event write paths (runtime):
 - `shared/telemetry/telemetry.py:_flush_events` -> sink fanout.

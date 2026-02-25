@@ -1,1 +1,1 @@
-"""WNBA success prediction project."""
+"""WNBA elite impact projection project."""
