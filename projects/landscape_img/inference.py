@@ -45,19 +45,6 @@ def decode_uploaded_image(image_bytes: bytes) -> np.ndarray:
     return cv2.cvtColor(bgr_image, cv2.COLOR_BGR2RGB)
 
 
-def decode_uploaded_image_legacy_bgr(image_bytes: bytes) -> np.ndarray:
-    """Decode bytes in legacy OpenCV mode and return BGR image."""
-    buffer = np.frombuffer(image_bytes, dtype=np.uint8)
-    image = cv2.imdecode(buffer, cv2.IMREAD_UNCHANGED)
-    if image is None:
-        raise ValueError("Could not decode image bytes.")
-    if image.ndim == 2:
-        return cv2.cvtColor(image, cv2.COLOR_GRAY2BGR)
-    if image.shape[2] == 4:
-        return cv2.cvtColor(image, cv2.COLOR_BGRA2BGR)
-    return image
-
-
 def _resize_for_inference(
     image_rgb: np.ndarray,
     *,

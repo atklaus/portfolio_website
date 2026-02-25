@@ -28,7 +28,6 @@ from projects.landscape_img.inference import (
     MODEL_INPUT_SIZE,
     aggregate_predictions,
     decode_uploaded_image,
-    decode_uploaded_image_legacy_bgr,
     prepare_model_batch,
 )
 from shared.settings import get_settings
@@ -164,21 +163,13 @@ def _run_inference(
     class_names: tuple[str, ...],
     *,
     preprocess_mode_override: str | None = None,
-    color_mode_override: str | None = None,
     inference_backend_override: str | None = None,
 ) -> dict:
     timings_ms: dict[str, float] = {}
 
     decode_start = perf_counter()
-    color_mode = color_mode_override or st.session_state.get(
-        "landscape_color_mode", "Legacy OpenCV (BGR)"
-    )
-    if color_mode == "Legacy OpenCV (BGR)":
-        model_image = decode_uploaded_image_legacy_bgr(uploaded_bytes)
-        image_rgb = model_image[:, :, ::-1]
-    else:
-        image_rgb = decode_uploaded_image(uploaded_bytes)
-        model_image = image_rgb
+    image_rgb = decode_uploaded_image(uploaded_bytes)
+    model_image = image_rgb
     timings_ms["decode"] = (perf_counter() - decode_start) * 1000
 
     preprocess_start = perf_counter()
@@ -258,26 +249,23 @@ def _run_inference(
 
 
 def _run_compatibility_sweep(uploaded_bytes: bytes, class_names: tuple[str, ...]) -> pd.DataFrame:
-    """Run fixed CPU checks across preprocessing/color combinations."""
+    """Run fixed CPU checks across preprocessing combinations."""
     configs = [
-        ("Legacy sparse tiling (original)", "Legacy OpenCV (BGR)"),
-        ("Legacy sparse tiling (original)", "RGB"),
-        ("Full coverage tiling (edge-aligned)", "Legacy OpenCV (BGR)"),
-        ("Full coverage tiling (edge-aligned)", "RGB"),
+        ("Legacy sparse tiling (original)",),
+        ("Full coverage tiling (edge-aligned)",),
     ]
     rows = []
-    for preprocess_mode, color_mode in configs:
+    for (preprocess_mode,) in configs:
         result = _run_inference(
             uploaded_bytes,
             class_names,
             preprocess_mode_override=preprocess_mode,
-            color_mode_override=color_mode,
             inference_backend_override="CPU (stable)",
         )
         rows.append(
             {
                 "Preprocess": preprocess_mode,
-                "Color": color_mode,
+                "Color": "RGB",
                 "Top label": result["top_label"],
                 "Confidence": result["top_probability"],
                 "Entropy": result["mean_entropy"],
@@ -309,8 +297,6 @@ with page_guard(os.path.basename(__file__)):
         st.session_state["landscape_file_digest"] = None
     if "landscape_result" not in st.session_state:
         st.session_state["landscape_result"] = None
-    if "landscape_last_color_mode" not in st.session_state:
-        st.session_state["landscape_last_color_mode"] = None
     if "landscape_last_preprocess_mode" not in st.session_state:
         st.session_state["landscape_last_preprocess_mode"] = None
     if "landscape_last_backend" not in st.session_state:
@@ -338,16 +324,7 @@ with page_guard(os.path.basename(__file__)):
                     "Full coverage mode includes edge tiles and applies bounded resize for faster deterministic coverage."
                 ),
             )
-            st.selectbox(
-                "Input color pipeline",
-                options=["Legacy OpenCV (BGR)", "RGB"],
-                index=0,
-                key="landscape_color_mode",
-                help=(
-                    "Use Legacy OpenCV (BGR) for compatibility with this saved model artifact. "
-                    "Switch to RGB only for comparison/debugging."
-                ),
-            )
+            st.caption("Input color pipeline: **RGB**")
             st.selectbox(
                 "Execution backend",
                 options=["CPU (stable)", "Auto", "GPU (experimental)"],
@@ -372,25 +349,23 @@ with page_guard(os.path.basename(__file__)):
                 key="landscape_run_inference",
             )
             compat_clicked = st.button(
-                "Run compatibility check (CPU, 4 modes)",
+                "Run compatibility check (CPU, 2 modes)",
                 use_container_width=True,
                 disabled=uploaded_file is None,
                 key="landscape_run_compat",
-                help="Compares legacy/full tiling and BGR/RGB paths under CPU stable execution.",
+                help="Compares legacy and full-coverage tiling under CPU stable execution.",
             )
 
     result = None
     if uploaded_file is not None:
         uploaded_bytes = uploaded_file.getvalue()
         current_digest = hashlib.sha256(uploaded_bytes).hexdigest()
-        current_color_mode = st.session_state.get("landscape_color_mode", "Legacy OpenCV (BGR)")
         current_preprocess_mode = st.session_state.get(
             "landscape_preprocess_mode",
             "Legacy sparse tiling (original)",
         )
         current_backend = st.session_state.get("landscape_inference_backend", "CPU (stable)")
         digest_changed = current_digest != st.session_state["landscape_file_digest"]
-        color_mode_changed = current_color_mode != st.session_state["landscape_last_color_mode"]
         preprocess_mode_changed = (
             current_preprocess_mode != st.session_state["landscape_last_preprocess_mode"]
         )
@@ -399,9 +374,6 @@ with page_guard(os.path.basename(__file__)):
             st.session_state["landscape_file_digest"] = current_digest
             st.session_state["landscape_result"] = None
             st.session_state["landscape_compat_result"] = None
-        if color_mode_changed:
-            st.session_state["landscape_result"] = None
-            st.session_state["landscape_last_color_mode"] = current_color_mode
         if preprocess_mode_changed:
             st.session_state["landscape_result"] = None
             st.session_state["landscape_last_preprocess_mode"] = current_preprocess_mode
@@ -411,7 +383,6 @@ with page_guard(os.path.basename(__file__)):
 
         should_run = (
             digest_changed
-            or color_mode_changed
             or preprocess_mode_changed
             or backend_changed
             or rerun_clicked
@@ -442,7 +413,6 @@ with page_guard(os.path.basename(__file__)):
     else:
         st.session_state["landscape_file_digest"] = None
         st.session_state["landscape_result"] = None
-        st.session_state["landscape_last_color_mode"] = None
         st.session_state["landscape_last_preprocess_mode"] = None
         st.session_state["landscape_last_backend"] = None
         st.session_state["landscape_compat_result"] = None
@@ -495,12 +465,12 @@ with page_guard(os.path.basename(__file__)):
                 timings = result["timings_ms"]
                 if meta.strategy == "legacy_sparse":
                     strategy_desc = (
-                        "decode once -> optional BGR compatibility conversion -> original sparse tiling -> mean tile probability aggregation"
+                        "decode once -> RGB conversion -> original sparse tiling -> mean tile probability aggregation"
                     )
                     coverage_note = "Legacy mode matches original behavior and may skip some edge regions."
                 else:
                     strategy_desc = (
-                        "decode once -> optional BGR compatibility conversion -> aspect-preserving resize -> deterministic edge-aligned tiling -> mean tile probability aggregation"
+                        "decode once -> RGB conversion -> aspect-preserving resize -> deterministic edge-aligned tiling -> mean tile probability aggregation"
                     )
                     coverage_note = "Edge-aligned starts ensure final row/column coverage."
                 with st.expander("Explain", expanded=False):
@@ -511,7 +481,7 @@ with page_guard(os.path.basename(__file__)):
 - **Dataset size:** approximately {DATASET_SIZE_APPROX:,} labeled images
 - **Preprocessing strategy:** {strategy_desc}
 - **Preprocessing mode:** `{st.session_state.get("landscape_preprocess_mode", "Legacy sparse tiling (original)")}`
-- **Color mode:** `{st.session_state.get("landscape_color_mode", "Legacy OpenCV (BGR)")}` (default is legacy compatibility mode)
+- **Color mode:** `RGB`
 - **Execution backend:** `{st.session_state.get("landscape_inference_backend", "CPU (stable)")}`
 - **Coverage note:** {coverage_note}
                         """
@@ -551,7 +521,7 @@ with page_guard(os.path.basename(__file__)):
                 with st.expander("Compatibility check (CPU stable)", expanded=False):
                     compat_df = st.session_state.get("landscape_compat_result")
                     if compat_df is None:
-                        st.caption("Click “Run compatibility check (CPU, 4 modes)” to compare preprocessing paths.")
+                        st.caption("Click “Run compatibility check (CPU, 2 modes)” to compare preprocessing paths.")
                     else:
                         st.dataframe(
                             compat_df,

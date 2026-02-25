@@ -141,15 +141,21 @@ function buildBucketResponse(request, object, key, seoConfig) {
 
 export default {
   async fetch(request, env) {
-    if (request.method !== "GET" && request.method !== "HEAD") {
-      return new Response("Method Not Allowed", {
-        status: 405,
-        headers: { Allow: "GET, HEAD" },
-      });
-    }
-
     const url = new URL(request.url);
     const apexRequest = isApexHost(url);
+    const appLikePath = isAppPath(url.pathname) || url.pathname.startsWith("/_stcore/");
+
+    // Allow non-GET/HEAD methods for Streamlit app paths so uploads and
+    // websocket-related endpoints can reach the Fly app origin.
+    if (request.method !== "GET" && request.method !== "HEAD") {
+      if (!(apexRequest && appLikePath)) {
+        return new Response("Method Not Allowed", {
+          status: 405,
+          headers: { Allow: "GET, HEAD" },
+        });
+      }
+      return proxyToApp(request, env, url);
+    }
 
     if (apexRequest && url.pathname === "/app") {
       const redirected = new URL(url.toString());
