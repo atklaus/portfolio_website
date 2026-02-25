@@ -6,6 +6,7 @@ from pathlib import Path
 from urllib.parse import quote
 
 from app import config as app_config
+from shared.urls import app_path
 
 
 @dataclass(frozen=True)
@@ -111,12 +112,12 @@ def get_page_by_file(filename: str) -> PageDef | None:
     return None
 
 
-def page_url(page: PageDef, base_url: str) -> str:
+def page_url(page: PageDef, base_url: str, app_base_path: str = "") -> str:
     base = base_url.rstrip("/")
     if page.key == "home":
-        return f"{base}/"
+        return f"{base}{app_path('/', app_base_path)}"
     raw = page.url_path.strip()
     if raw in {"", "/"}:
-        return f"{base}/"
+        return f"{base}{app_path('/', app_base_path)}"
     path = raw if raw.startswith("/") else f"/{raw}"
-    return f"{base}{quote(path)}"
+    return f"{base}{app_path(quote(path), app_base_path)}"

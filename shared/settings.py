@@ -10,6 +10,7 @@ import streamlit as st
 class AppSettings:
     app_name: str
     site_url: str
+    app_base_path: str
     social_image_url: str
     github_url: str
     linkedin_url: str
@@ -44,10 +45,11 @@ def _get_env_bool(key: str, default: bool = False) -> bool:
 def get_settings() -> AppSettings:
     app_name = _get_secret("app", "name", _get_env("APP_NAME", "DataBuilds.dev"))
     site_url = _get_secret("app", "site_url", _get_env("SITE_URL", "https://databuilds.dev"))
+    app_base_path = _get_secret("app", "base_path", _get_env("APP_BASE_PATH", ""))
     social_image_url = _get_secret(
         "app",
         "social_image_url",
-        _get_env("SOCIAL_IMAGE_URL", f"{site_url.rstrip('/')}/static/images/ads_logo.png"),
+        _get_env("SOCIAL_IMAGE_URL", f"{site_url.rstrip('/')}/og-image.png"),
     )
     github_url = _get_secret("links", "github", _get_env("GITHUB_URL", "https://github.com/atklaus"))
     linkedin_url = _get_secret("links", "linkedin", _get_env("LINKEDIN_URL", "https://linkedin.com/in/adam-klaus"))
@@ -65,6 +67,7 @@ def get_settings() -> AppSettings:
     return AppSettings(
         app_name=app_name,
         site_url=site_url,
+        app_base_path=app_base_path,
         social_image_url=social_image_url,
         github_url=github_url,
         linkedin_url=linkedin_url,

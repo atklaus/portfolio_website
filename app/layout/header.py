@@ -7,6 +7,7 @@ from .. import config as c
 from lib.ops.memory import log_mem
 from shared.seo import apply_page_meta
 from shared.settings import email_href, get_settings
+from shared.urls import app_path
 
 BACKGROUND_COLOR = "white"
 COLOR = "black"
@@ -95,6 +96,8 @@ def _page_index():
 def get_page_path(name: str) -> str:
     from shared.pages import get_pages
 
+    settings = get_settings()
+    base_path = settings.app_base_path
     target = _standardize_name(name)
     for page in get_pages():
         slug = _standardize_name(page.key)
@@ -103,14 +106,15 @@ def get_page_path(name: str) -> str:
         file_slug = _standardize_name(parts[1] if len(parts) > 1 and parts[0].isdigit() else stem)
         if slug == target or file_slug == target:
             if page.key == "home":
-                return "/"
-            return f"/{page.url_path}"
-    return "/"
+                return app_path("/", base_path)
+            return app_path(f"/{page.url_path}", base_path)
+    return app_path("/", base_path)
 
 
 def render_sidebar_nav(page_name: str):
     with st.sidebar:
         settings = get_settings()
+        base_path = settings.app_base_path
         github_profile_url = settings.github_url
         linkedin_profile_url = settings.linkedin_url
         email_address = email_href(settings.contact_email)
@@ -131,7 +135,7 @@ def render_sidebar_nav(page_name: str):
 
         nav_links = []
         for label, anchor in nav_items:
-            href = f"/?section={anchor}#{anchor}"
+            href = f"{app_path('/', base_path)}?section={anchor}#{anchor}"
             active = " active" if section == anchor else ""
             nav_links.append(
                 f'<a class="ads-nav-item{active}" href="{href}" target="_self" rel="noopener">{label}</a>'
@@ -198,6 +202,7 @@ def render_sidebar_nav(page_name: str):
 """
         st.markdown(sidebar_html, unsafe_allow_html=True)
 
+
 def page_header(title, page_name, container_style=True):
     try:
         apply_page_meta(str(page_name))
@@ -222,13 +227,14 @@ def page_header(title, page_name, container_style=True):
     github_profile_url = settings.github_url
     linkedin_profile_url = settings.linkedin_url
     brand_name = settings.app_name
+    home_href = app_path("/", settings.app_base_path)
     navbar_html = f"""
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.3/css/all.min.css">
     <div class="ads-nav">
       <div class="content-shell ads-nav-inner">
         <div class="ads-nav-brand">{brand_name}</div>
         <div class="ads-nav-actions">
-          <a class="ads-icon-btn" href="/" target="_self" rel="noopener" aria-label="Home"><i class="fas fa-home"></i></a>
+          <a class="ads-icon-btn" href="{home_href}" target="_self" rel="noopener" aria-label="Home"><i class="fas fa-home"></i></a>
           <a class="ads-icon-btn" href="{github_profile_url}" target="_blank" rel="noopener" aria-label="GitHub"><i class="fas fa-code"></i></a>
           <a class="ads-icon-btn" href="{linkedin_profile_url}" target="_blank" rel="noopener" aria-label="LinkedIn"><i class="fab fa-linkedin"></i></a>
         </div>

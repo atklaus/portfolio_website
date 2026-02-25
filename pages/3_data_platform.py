@@ -10,6 +10,7 @@ import streamlit.components.v1 as components
 from app.layout import header
 from shared.telemetry import page_guard
 from shared.settings import get_settings
+from shared.urls import app_path
 
 
 DBT_DOCS_BASE_URL_DEFAULT = "https://public.databuilds.dev/dbt_docs/latest"
@@ -171,6 +172,7 @@ with page_guard(os.path.basename(__file__)):
     header.page_header("Analytics Ops", page_name=os.path.basename(__file__))
 
     settings = get_settings()
+    home_href = app_path("/", settings.app_base_path)
     github_profile_url = settings.github_url
     linkedin_profile_url = settings.linkedin_url
 
@@ -271,7 +273,7 @@ with page_guard(os.path.basename(__file__)):
         <div class="dp-subtitle">dbt docs + lineage powering this site</div>
       </div>
       <div class="dp-actions">
-        <a class="ads-icon-btn" href="/" target="_self" rel="noopener" aria-label="Home"><i class="fas fa-home"></i></a>
+        <a class="ads-icon-btn" href="{home_href}" target="_self" rel="noopener" aria-label="Home"><i class="fas fa-home"></i></a>
         <a class="ads-icon-btn" href="{github_profile_url}" target="_blank" rel="noopener" aria-label="GitHub"><i class="fas fa-code"></i></a>
         <a class="ads-icon-btn" href="{linkedin_profile_url}" target="_blank" rel="noopener" aria-label="LinkedIn"><i class="fab fa-linkedin"></i></a>
       </div>

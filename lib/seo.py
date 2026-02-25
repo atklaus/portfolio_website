@@ -47,7 +47,19 @@ def inject_social_meta(
           }}
           tag.setAttribute('content', content);
         }};
+        const ensureCanonical = (href) => {{
+          if (!href) return;
+          let link = targetDocument.querySelector("link[rel='canonical']");
+          if (!link) {{
+            link = targetDocument.createElement('link');
+            link.setAttribute('rel', 'canonical');
+            head.appendChild(link);
+          }}
+          link.setAttribute('href', href);
+        }};
 
+        ensure('name', 'description', {json.dumps(safe_desc)});
+        ensure('name', 'robots', 'index, follow, max-image-preview:large');
         ensure('property', 'og:title', {json.dumps(safe_title)});
         ensure('property', 'og:description', {json.dumps(safe_desc)});
         ensure('property', 'og:type', {json.dumps(safe_og_type)});
@@ -57,6 +69,8 @@ def inject_social_meta(
         ensure('name', 'twitter:title', {json.dumps(safe_title)});
         ensure('name', 'twitter:description', {json.dumps(safe_desc)});
         ensure('name', 'twitter:image', {json.dumps(safe_image_url)});
+        ensure('name', 'twitter:url', {json.dumps(safe_url)});
+        ensureCanonical({json.dumps(safe_url)});
       }})();
     </script>
     """

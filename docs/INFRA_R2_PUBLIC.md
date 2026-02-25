@@ -2,9 +2,10 @@
 
 ## Overview
 
-This repo serves public dbt docs from a dedicated Cloudflare R2 bucket through a
-Cloudflare Worker. The Worker applies iframe-friendly headers and cache control
-rules so the docs can be embedded in the Streamlit app at https://databuilds.dev.
+This repo serves public static assets from a dedicated Cloudflare R2 bucket
+through a Cloudflare Worker. The Worker applies iframe-friendly headers and
+cache control rules so docs can be embedded and SEO assets can be served at the
+apex domain.
 
 ## Bucket and URL
 
@@ -45,6 +46,12 @@ Worker source and config live in:
 
 The Worker routes `public.databuilds.dev/*` and reads objects from the
 `databuilds-public` R2 bucket via the `PUBLIC_BUCKET` binding.
+
+For `databuilds.dev/*`:
+
+- `https://databuilds.dev/` serves static SEO landing page (`index.html`) from R2.
+- `https://databuilds.dev/app/*` proxies to `APP_ORIGIN` (Streamlit on Fly).
+- Legacy routes like `https://databuilds.dev/landscape_img` redirect to `/app/landscape_img`.
 
 ## CI Uploads
 

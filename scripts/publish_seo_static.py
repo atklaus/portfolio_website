@@ -11,8 +11,11 @@ ROOT = Path(__file__).resolve().parents[1]
 STATIC_DIR = ROOT / "static"
 
 SEO_FILES: tuple[tuple[str, Path, str], ...] = (
+    ("index.html", STATIC_DIR / "index.html", "text/html; charset=utf-8"),
     ("sitemap.xml", STATIC_DIR / "sitemap.xml", "application/xml; charset=utf-8"),
     ("robots.txt", STATIC_DIR / "robots.txt", "text/plain; charset=utf-8"),
+    ("og-image.png", STATIC_DIR / "images" / "og_image_1200x630.png", "image/png"),
+    ("favicon.ico", STATIC_DIR / "images" / "favicon.ico", "image/x-icon"),
 )
 
 

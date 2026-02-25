@@ -4,7 +4,7 @@ app = "streamlit-portfolio"
 
 # Primary process group for the app
 [processes]
-  app = "streamlit run app.py --server.address=0.0.0.0 --server.port=8501"
+  app = "streamlit run app.py --server.address=0.0.0.0 --server.port=8501 --server.baseUrlPath=app"
 
 # HTTP service exposing Streamlit on port 8501
 [http_service]
@@ -33,7 +33,11 @@ app = "streamlit-portfolio"
 # Optional runtime environment (secrets should be set via `fly secrets set`)
 [env]
   PORT = "8501"
+  APP_BASE_PATH = "/app"
+  SITE_URL = "https://databuilds.dev"
+  SOCIAL_IMAGE_URL = "https://databuilds.dev/og-image.png"
   STREAMLIT_SERVER_ADDRESS = "0.0.0.0"
+  STREAMLIT_SERVER_BASE_URL_PATH = "app"
   STREAMLIT_SERVER_PORT = "8501"
   STREAMLIT_SERVER_HEADLESS = "true"
   STREAMLIT_SERVER_ENABLE_CORS = "false"

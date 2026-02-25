@@ -7,3 +7,6 @@ routes = ["public.databuilds.dev/*", "databuilds.dev/*"]
 [[r2_buckets]]
 binding = "PUBLIC_BUCKET"
 bucket_name = "databuilds-public"
+
+[vars]
+APP_ORIGIN = "https://streamlit-portfolio.fly.dev"
