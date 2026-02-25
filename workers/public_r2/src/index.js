@@ -179,6 +179,11 @@ export default {
     }
 
     if (apexRequest) {
+      if (url.pathname === "/") {
+        const redirected = new URL(url.toString());
+        redirected.pathname = "/app/";
+        return Response.redirect(redirected.toString(), 302);
+      }
       return proxyToApp(request, env, url);
     }
 
