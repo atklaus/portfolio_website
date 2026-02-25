@@ -4,7 +4,7 @@ app = "streamlit-portfolio"
 
 # Primary process group for the app
 [processes]
-  app = "streamlit run app.py --server.address=0.0.0.0 --server.port=8501 --server.baseUrlPath=app"
+  app = "python -m streamlit run /home/appuser/app.py --server.address=0.0.0.0 --server.port=8501 --server.baseUrlPath=app --server.headless=true --server.enableCORS=false"
 
 # HTTP service exposing Streamlit on port 8501
 [http_service]
@@ -25,9 +25,9 @@ app = "streamlit-portfolio"
   [[http_service.checks]]
     interval = "15s"
     timeout = "10s"
-    grace_period = "45s"
+    grace_period = "90s"
     method = "GET"
-    path = "/"
+    path = "/app/_stcore/health"
     protocol = "http"
 
 # Optional runtime environment (secrets should be set via `fly secrets set`)
