@@ -145,8 +145,13 @@ def prepare_model_batch(
     """Build float32 model input batch plus metadata for instrumentation."""
     original_height, original_width = image_rgb.shape[:2]
     if strategy == "legacy_sparse":
-        resized_image = image_rgb
-        resize_scale = 1.0
+        # Keep legacy sparse tiling behavior, but still bound very large images
+        # to avoid OOM spikes on small production instances.
+        resized_image, resize_scale = _resize_for_inference(
+            image_rgb,
+            max_long_edge=max_long_edge,
+            min_short_edge=1,
+        )
         resized_height, resized_width = resized_image.shape[:2]
         tiles = tile_image_legacy_sparse(
             resized_image,

@@ -36,6 +36,10 @@ from shared.telemetry import page_guard
 ROOT_DIR = Path(__file__).resolve().parents[1]
 MODEL_DIR = ROOT_DIR / "projects" / "landscape_img" / "model"
 DATASET_SIZE_APPROX = 5000
+MAX_UPLOAD_BYTES = 25 * 1024 * 1024
+LEGACY_MAX_LONG_EDGE = 2200
+PREPROCESS_MODE_LEGACY = "Legacy sparse tiling"
+PREPROCESS_MODE_FULL = "Full coverage tiling - edge aligned"
 
 
 @st.cache_resource(show_spinner=False)
@@ -175,11 +179,11 @@ def _run_inference(
     preprocess_start = perf_counter()
     preprocess_mode = preprocess_mode_override or st.session_state.get(
         "landscape_preprocess_mode",
-        "Legacy sparse tiling (original)",
+        PREPROCESS_MODE_LEGACY,
     )
-    strategy = "legacy_sparse" if preprocess_mode == "Legacy sparse tiling (original)" else "full_coverage"
+    strategy = "legacy_sparse" if preprocess_mode == PREPROCESS_MODE_LEGACY else "full_coverage"
     overlap = DEFAULT_LEGACY_TILE_OVERLAP if strategy == "legacy_sparse" else DEFAULT_TILE_OVERLAP
-    max_long_edge = 10000 if strategy == "legacy_sparse" else DEFAULT_MAX_LONG_EDGE
+    max_long_edge = LEGACY_MAX_LONG_EDGE if strategy == "legacy_sparse" else DEFAULT_MAX_LONG_EDGE
     batch, preprocess_meta = prepare_model_batch(
         model_image,
         tile_size=MODEL_INPUT_SIZE,
@@ -251,8 +255,8 @@ def _run_inference(
 def _run_compatibility_sweep(uploaded_bytes: bytes, class_names: tuple[str, ...]) -> pd.DataFrame:
     """Run fixed CPU checks across preprocessing combinations."""
     configs = [
-        ("Legacy sparse tiling (original)",),
-        ("Full coverage tiling (edge-aligned)",),
+        (PREPROCESS_MODE_LEGACY,),
+        (PREPROCESS_MODE_FULL,),
     ]
     rows = []
     for (preprocess_mode,) in configs:
@@ -297,6 +301,8 @@ with page_guard(os.path.basename(__file__)):
         st.session_state["landscape_file_digest"] = None
     if "landscape_result" not in st.session_state:
         st.session_state["landscape_result"] = None
+    if "landscape_preprocess_mode" not in st.session_state:
+        st.session_state["landscape_preprocess_mode"] = PREPROCESS_MODE_FULL
     if "landscape_last_preprocess_mode" not in st.session_state:
         st.session_state["landscape_last_preprocess_mode"] = None
     if "landscape_last_backend" not in st.session_state:
@@ -314,10 +320,10 @@ with page_guard(os.path.basename(__file__)):
             st.selectbox(
                 "Preprocessing strategy",
                 options=[
-                    "Legacy sparse tiling (original)",
-                    "Full coverage tiling (edge-aligned)",
+                    PREPROCESS_MODE_LEGACY,
+                    PREPROCESS_MODE_FULL,
                 ],
-                index=0,
+                index=1,
                 key="landscape_preprocess_mode",
                 help=(
                     "Legacy mode reproduces the original page behavior for model compatibility checks. "
@@ -339,7 +345,7 @@ with page_guard(os.path.basename(__file__)):
                 "Choose an image",
                 type=["jpg", "jpeg", "png", "webp", "bmp"],
                 key="submit_landscape",
-                help="Supports common image formats. Inference runs locally in this app process.",
+                help="Supports common image formats. For stability on production instances, very large images are rejected.",
             )
             rerun_clicked = st.button(
                 "Run inference",
@@ -359,57 +365,62 @@ with page_guard(os.path.basename(__file__)):
     result = None
     if uploaded_file is not None:
         uploaded_bytes = uploaded_file.getvalue()
-        current_digest = hashlib.sha256(uploaded_bytes).hexdigest()
-        current_preprocess_mode = st.session_state.get(
-            "landscape_preprocess_mode",
-            "Legacy sparse tiling (original)",
-        )
-        current_backend = st.session_state.get("landscape_inference_backend", "CPU (stable)")
-        digest_changed = current_digest != st.session_state["landscape_file_digest"]
-        preprocess_mode_changed = (
-            current_preprocess_mode != st.session_state["landscape_last_preprocess_mode"]
-        )
-        backend_changed = current_backend != st.session_state["landscape_last_backend"]
-        if digest_changed:
-            st.session_state["landscape_file_digest"] = current_digest
+        if len(uploaded_bytes) > MAX_UPLOAD_BYTES:
+            st.error(
+                f"Image is too large ({len(uploaded_bytes) / (1024 * 1024):.1f} MB). "
+                f"Please upload an image under {MAX_UPLOAD_BYTES / (1024 * 1024):.0f} MB."
+            )
             st.session_state["landscape_result"] = None
             st.session_state["landscape_compat_result"] = None
-        if preprocess_mode_changed:
-            st.session_state["landscape_result"] = None
-            st.session_state["landscape_last_preprocess_mode"] = current_preprocess_mode
-        if backend_changed:
-            st.session_state["landscape_result"] = None
-            st.session_state["landscape_last_backend"] = current_backend
+            uploaded_bytes = None
+        if uploaded_bytes is None:
+            result = None
+        else:
+            current_digest = hashlib.sha256(uploaded_bytes).hexdigest()
+            current_preprocess_mode = st.session_state.get(
+                "landscape_preprocess_mode",
+                PREPROCESS_MODE_LEGACY,
+            )
+            current_backend = st.session_state.get("landscape_inference_backend", "CPU (stable)")
+            digest_changed = current_digest != st.session_state["landscape_file_digest"]
+            preprocess_mode_changed = (
+                current_preprocess_mode != st.session_state["landscape_last_preprocess_mode"]
+            )
+            backend_changed = current_backend != st.session_state["landscape_last_backend"]
+            if digest_changed:
+                st.session_state["landscape_file_digest"] = current_digest
+                st.session_state["landscape_compat_result"] = None
+            if preprocess_mode_changed:
+                st.session_state["landscape_last_preprocess_mode"] = current_preprocess_mode
+            if backend_changed:
+                st.session_state["landscape_last_backend"] = current_backend
 
-        should_run = (
-            digest_changed
-            or preprocess_mode_changed
-            or backend_changed
-            or rerun_clicked
-            or st.session_state["landscape_result"] is None
-        )
-        if should_run:
-            with st.spinner("Running landscape inference..."):
-                log_mem("landscape_predict:before_model")
-                try:
-                    st.session_state["landscape_result"] = _run_inference(uploaded_bytes, class_names)
-                except ValueError as exc:
-                    st.error(str(exc))
-                    st.session_state["landscape_result"] = None
-                log_mem("landscape_predict:after_model")
+            # Clear stale outputs when inputs/settings change, but do not auto-run.
+            if digest_changed or preprocess_mode_changed or backend_changed:
+                st.session_state["landscape_result"] = None
 
-        if compat_clicked:
-            with st.spinner("Running compatibility check..."):
-                try:
-                    st.session_state["landscape_compat_result"] = _run_compatibility_sweep(
-                        uploaded_bytes,
-                        class_names,
-                    )
-                except ValueError as exc:
-                    st.error(str(exc))
-                    st.session_state["landscape_compat_result"] = None
+            if rerun_clicked:
+                with st.spinner("Running landscape inference..."):
+                    log_mem("landscape_predict:before_model")
+                    try:
+                        st.session_state["landscape_result"] = _run_inference(uploaded_bytes, class_names)
+                    except ValueError as exc:
+                        st.error(str(exc))
+                        st.session_state["landscape_result"] = None
+                    log_mem("landscape_predict:after_model")
 
-        result = st.session_state["landscape_result"]
+            if compat_clicked:
+                with st.spinner("Running compatibility check..."):
+                    try:
+                        st.session_state["landscape_compat_result"] = _run_compatibility_sweep(
+                            uploaded_bytes,
+                            class_names,
+                        )
+                    except ValueError as exc:
+                        st.error(str(exc))
+                        st.session_state["landscape_compat_result"] = None
+
+            result = st.session_state["landscape_result"]
     else:
         st.session_state["landscape_file_digest"] = None
         st.session_state["landscape_result"] = None
@@ -480,7 +491,7 @@ with page_guard(os.path.basename(__file__)):
 - **Labels:** {", ".join(class_names)}
 - **Dataset size:** approximately {DATASET_SIZE_APPROX:,} labeled images
 - **Preprocessing strategy:** {strategy_desc}
-- **Preprocessing mode:** `{st.session_state.get("landscape_preprocess_mode", "Legacy sparse tiling (original)")}`
+- **Preprocessing mode:** `{st.session_state.get("landscape_preprocess_mode", PREPROCESS_MODE_LEGACY)}`
 - **Color mode:** `RGB`
 - **Execution backend:** `{st.session_state.get("landscape_inference_backend", "CPU (stable)")}`
 - **Coverage note:** {coverage_note}
