@@ -1,9 +1,9 @@
 name: analytics_pipeline
 
 on:
-  schedule:
-    # 02:30 America/Chicago (UTC-6). Adjust seasonally if you want DST alignment.
-    - cron: "30 8 * * *"
+  # schedule:
+  #   # 02:30 America/Chicago (UTC-6). Adjust seasonally if you want DST alignment.
+  #   - cron: "30 8 * * *"
   workflow_dispatch:
   push:
     branches:
